@@ -150,7 +150,8 @@ Les scripts le détectent automatiquement et retrouvent chaque morceau grâce à
 la ligne « LQR1 aa 1/100 ».
 
 C'est le seul format utilisé pour la sauvegarde. Les exports CSV et TXT de
-Binary Eye ne sont pas conservés.
+Binary Eye ne sont pas conservés. Les scans traduits automatiquement sont
+refusés.
 EOF
 
 PAGES_COMPACT=$(( (TOTAL + 19) / 20 ))
@@ -190,8 +191,9 @@ disponibles dans html/ et restent imprimables depuis un navigateur.
 1. Imprimer d'abord pdf/test_grand_8qr.pdf à 100 % (sans « ajuster à la page »),
    en 600 dpi si possible, et scanner les 8 QR avec Binary Eye.
 2. Si le test est bon, imprimer le format choisi, puis pdf/index_qr.pdf.
-3. Ne pas utiliser la traduction automatique du lecteur : le QR contient du CSV
-   brut, une traduction le rend illisible.
+3. Ne pas utiliser la traduction automatique du lecteur : le script refuse les
+   scans traduits, car le QR contient du CSV brut et une traduction le rend
+   illisible.
 4. Papier mat 80–100 g et imprimante laser de préférence ; éviter le papier
    brillant (reflets) et vérifier que l'impression est à l'échelle 100 %.
 
@@ -224,6 +226,9 @@ Binary Eye normalise les espaces insécables (U+00A0) en espaces simples dans
 ses exports. Le script affiche alors « IDENTIQUE APRÈS NORMALISATION NBSP » :
 c'est normal, seuls ces caractères de présentation changent, pas les mots de
 passe.
+
+Tout autre résultat, notamment « DIFFÉRENT », est un échec : ne supprime pas
+le CSV d'origine et corrige les scans avant de recommencer.
 
 FORMAT D'EXPORT BINARY EYE
 --------------------------

@@ -186,7 +186,9 @@ Il écrit `restauration.csv` et doit afficher :
 - `Résultat : IDENTIQUE APRÈS NORMALISATION NBSP` si seuls des espaces
   insécables (U+00A0) ont été remplacés par des espaces par Binary Eye. Le
   script indique alors le nombre d’espaces concernés : ce sont des caractères
-  de présentation, pas des mots de passe.
+  de présentation, pas des mots de passe ;
+- `Résultat : DIFFÉRENT` en cas d’écart : ne supprime pas l’export CSV
+  d’origine et corrige les scans avant de recommencer.
 
 C’est ce test qui autorise la suppression de l’export CSV d’origine.
 

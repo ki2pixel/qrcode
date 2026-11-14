@@ -116,6 +116,9 @@ dans le répertoire personnel de l'utilisateur `sudo`. Ne testez jamais
    * `2` : Extraire par nom (ex. `banque`, `google`)
    * `3` : Restauration complète du fichier CSV
 5. Le script écrit le résultat dans `/mnt/ram_sec/sorties/` et se met en pause (*« Appuie sur Entrée pour tout effacer... »*).
+6. Si la restauration affiche `DIFFÉRENT`, ne supprimez pas le CSV d'origine :
+   inspectez les scans et recommencez. `IDENTIQUE APRÈS NORMALISATION NBSP`
+   reste un succès.
 
 ### Étape 4 : Consulter ou copier le résultat en RAM (dans un 2ᵉ terminal)
 Puisque les fichiers sont confinés en mémoire vive et vous appartiennent (`chmod 600`), **aucun `sudo` n'est requis**. Ouvrez un second terminal pour les inspecter :
