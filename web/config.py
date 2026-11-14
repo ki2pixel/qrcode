@@ -11,7 +11,7 @@ DOSSIER_WEB = Path(__file__).resolve().parent
 
 HOTE = "127.0.0.1"
 PORT = 5100
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 
 # Hôtes acceptés dans l'en-tête Host : protection contre le DNS rebinding.
 HOTES_AUTORISES = frozenset(

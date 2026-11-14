@@ -258,7 +258,16 @@ code, .mono { font-family: var(--mono); font-size: 0.9em; }
   color: var(--encre);
   font-weight: 500;
 }
-.champ input:focus, .champ select:focus, .bouton:focus-visible, .onglet:focus-visible, .zone-depot:focus-visible {
+.champ input:focus,
+.champ select:focus,
+.bouton:focus-visible,
+.onglet:focus-visible,
+.zone-depot:focus-visible,
+.choix:has(input:focus-visible),
+.dossier-detecte:focus-visible,
+.resultat-recherche:focus-visible,
+.champ-masque-bouton:focus-visible,
+.fichier-telechargement:focus-visible {
   outline: 3px solid rgba(28, 90, 71, 0.35);
   outline-offset: 2px;
 }

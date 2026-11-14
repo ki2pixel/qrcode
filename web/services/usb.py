@@ -233,11 +233,9 @@ def _analyser(noeud: dict, swaps: set[str]) -> dict:
         and not danger
     )
     sur_sans_montage = (
-        not est_loop
-        and type_principal == "disk"
-        and taille >= 1024 * 1024 * 1024
+        taille >= 1024 * 1024 * 1024
         and not ro
-        and amovible
+        and (amovible or est_loop)
         and not systeme
         and not swap
         and not holders

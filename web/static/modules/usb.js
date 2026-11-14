@@ -686,6 +686,22 @@ function revenirOperation() {
   if (etat.selection) afficher($("#usb-etape-operation"), true);
 }
 
+export function reinitialiserUsb() {
+  etat.donnees = null;
+  etat.selection = null;
+  etat.commandes = null;
+  $("#usb-peripheriques").innerHTML = "";
+  $("#usb-dependances").innerHTML = "";
+  $("#usb-appareil-selectionne").innerHTML = "";
+  $("#usb-commandes").innerHTML = "";
+  $("#usb-checkliste").innerHTML = "";
+  $("#usb-avertissements").innerHTML = "";
+  afficher($("#usb-etape-operation"), false);
+  afficher($("#usb-etape-commandes"), false);
+  masquerMessage($("#usb-erreur"));
+  masquerMessage($("#usb-erreur-operation"));
+}
+
 export function initialiserUsb() {
   $("#usb-bouton-rafraichir")?.addEventListener("click", () => {
     etat.donnees = null;

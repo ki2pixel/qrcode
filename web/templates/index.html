@@ -59,13 +59,13 @@
         </span>
       </a>
       <nav class="onglets" role="tablist" aria-label="Modules">
-        <button class="onglet actif" type="button" role="tab" id="onglet-generation" aria-controls="module-generation" data-module="generation" aria-selected="true">
+        <button class="onglet actif" type="button" role="tab" id="onglet-generation" aria-controls="module-generation" data-module="generation" aria-selected="true" tabindex="0">
           <svg class="icone"><use href="#icone-qr"></use></svg><span>Créer</span>
         </button>
-        <button class="onglet" type="button" role="tab" id="onglet-consultation" aria-controls="module-consultation" data-module="consultation" aria-selected="false">
+        <button class="onglet" type="button" role="tab" id="onglet-consultation" aria-controls="module-consultation" data-module="consultation" aria-selected="false" tabindex="-1">
           <svg class="icone"><use href="#icone-loupe"></use></svg><span>Consulter</span>
         </button>
-        <button class="onglet" type="button" role="tab" id="onglet-usb" aria-controls="module-usb" data-module="usb" aria-selected="false">
+        <button class="onglet" type="button" role="tab" id="onglet-usb" aria-controls="module-usb" data-module="usb" aria-selected="false" tabindex="-1">
           <svg class="icone"><use href="#icone-usb"></use></svg><span>Coffre USB</span>
         </button>
       </nav>
@@ -108,7 +108,7 @@
             <button id="bouton-remplacer-fichier" class="bouton bouton-secondaire bouton-petit" type="button">Remplacer</button>
           </div>
           <div id="gen-analyse-en-cours" class="chargement" hidden><span class="rouage" aria-hidden="true"></span> Analyse du CSV en mémoire…</div>
-          <div id="gen-erreur" class="message erreur" hidden><strong>Impossible d'analyser ce fichier.</strong><p id="gen-erreur-message"></p></div>
+          <div id="gen-erreur" class="message erreur" hidden></div>
         </div>
 
         <div class="carte" id="gen-etape-apercu" hidden>

@@ -8,6 +8,7 @@ Pas de manifeste, lockfile, CI, linter ni suite de tests automatisés. Les scrip
 Documentation utilisateur détaillée : `README.md`.
 Documentation coffre USB : `docs/GUIDE_OPERATOIRE_COFFRE_USB.md` et `docs/Sauvegarde_USB_Chiffrée_sous_Linux.md`.
 Audit cryptographique et d'intégrité : `docs/Audit-technique-cryptographique-et-dintegrite-complet.md` (diagnostic initial et statut des remédiations).
+Audit de sécurité de l'interface web : `docs/Rapport-daudit-de-securite-frontend-web.md` (constats SEC/ARCH/USB/A11Y résolus en v1.0.1).
 
 ## Commandes
 

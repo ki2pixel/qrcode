@@ -55,6 +55,9 @@ export function toast(message, type = "info", duree = 6000) {
 
 function messageErreur(donnees, statut) {
   if (donnees && typeof donnees.erreur === "string" && donnees.erreur.trim()) {
+    if (typeof donnees.reference === "string" && donnees.reference.trim()) {
+      return `${donnees.erreur} (Référence : ${donnees.reference.trim()})`;
+    }
     return donnees.erreur;
   }
   return `Erreur HTTP ${statut}.`;
@@ -202,6 +205,7 @@ export async function copier(texte, message = "Commande copiée dans le presse-p
 export function afficherMessage(element, texte, type = "erreur") {
   if (!element) return;
   element.className = `message ${type}`;
+  element.setAttribute("role", type === "erreur" ? "alert" : "status");
   element.textContent = texte;
   element.hidden = false;
 }
@@ -209,6 +213,7 @@ export function afficherMessage(element, texte, type = "erreur") {
 export function masquerMessage(element) {
   if (!element) return;
   element.hidden = true;
+  element.removeAttribute("role");
   element.textContent = "";
 }
 

@@ -54,6 +54,7 @@ LIBELLES_MASQUES = {
     "fields": "Champs personnalisés",
     "champs": "Champs personnalisés",
     "reprompt": "Demande de confirmation",
+    "uri_complete": "URL complète (avec identifiants)",
 }
 FICHIERS_REQUIS = (
     "csv/index_enregistrements.csv",
@@ -754,6 +755,16 @@ def _libelle_masque(cle: str) -> str:
     return LIBELLES_MASQUES.get(cle.casefold(), cle)
 
 
+def _verifier_scans_complets(session: SessionConsultation) -> None:
+    if not session.scans_info or session.scans_info.get("manquants_total", 0) > 0:
+        raise ErreurUtilisateur(
+            "Des morceaux QR manquent dans l'export de scans. "
+            "Complétez les scans avant de continuer.",
+            409,
+            "scans_incomplets",
+        )
+
+
 def _indices_surs(entete: list[str]) -> dict[int, str]:
     resultat: dict[int, str] = {}
     for champ in CHAMPS_SURS:
@@ -765,6 +776,7 @@ def _indices_surs(entete: list[str]) -> dict[int, str]:
 
 def extraire(session: SessionConsultation, record_id: str) -> dict:
     with session.verrou:
+        _verifier_scans_complets(session)
         if not re.fullmatch(r"R\d{1,9}", record_id or "", flags=re.IGNORECASE):
             raise ErreurUtilisateur(
                 "Identifiant invalide. Exemple : R123.", 400, "id_invalide"
@@ -850,12 +862,20 @@ def extraire(session: SessionConsultation, record_id: str) -> dict:
             indices_surs = _indices_surs(entete)
             for index_ligne, row in enumerate(rows[1:]):
                 visibles = []
+                uri_complete_index = None
                 for index, libelle in indices_surs.items():
+                    valeur_brute = row[index] if index < len(row) else ""
+                    if libelle == LIBELLES_SURS["uri"]:
+                        valeur_visible = rediger_uri(valeur_brute)
+                        if valeur_visible != valeur_brute:
+                            uri_complete_index = index
+                    else:
+                        valeur_visible = valeur_brute
                     visibles.append(
                         {
                             "cle": entete[index],
                             "libelle": libelle,
-                            "valeur": row[index] if index < len(row) else "",
+                            "valeur": valeur_visible,
                         }
                     )
                 masques = [
@@ -863,12 +883,20 @@ def extraire(session: SessionConsultation, record_id: str) -> dict:
                     for index, valeur in enumerate(entete)
                     if index not in indices_surs
                 ]
+                if uri_complete_index is not None:
+                    masques.append(
+                        {
+                            "cle": "uri",
+                            "libelle": _libelle_masque("uri_complete"),
+                        }
+                    )
                 lignes_internes.append(
                     {
                         "fichier": str(fichier),
                         "index": index_ligne,
                         "entete": entete,
                         "indices_surs": indices_surs,
+                        "uri_complete_index": uri_complete_index,
                     }
                 )
                 lignes_publiques.append(
@@ -936,6 +964,17 @@ def reveler(session: SessionConsultation, extraction_id: str, ligne: int) -> dic
                     "valeur": row[index] if index < len(row) else "",
                 }
             )
+        uri_complete_index = interne.get("uri_complete_index")
+        if uri_complete_index is not None:
+            champs.append(
+                {
+                    "cle": "uri",
+                    "libelle": _libelle_masque("uri_complete"),
+                    "valeur": row[uri_complete_index]
+                    if uri_complete_index < len(row)
+                    else "",
+                }
+            )
         session.derniere_activite = time.time()
         return {"extraction_id": extraction_id, "ligne": ligne, "champs": champs}
 
@@ -977,6 +1016,7 @@ def _extraire_hash(texte: str, motif: str) -> str | None:
 
 def restaurer(session: SessionConsultation) -> dict:
     with session.verrou:
+        _verifier_scans_complets(session)
         if session.scans_path is None:
             raise ErreurUtilisateur(
                 "Importez d'abord l'export JSON de Binary Eye.",

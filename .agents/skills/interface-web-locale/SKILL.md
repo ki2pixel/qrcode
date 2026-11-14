@@ -72,8 +72,8 @@ Ne pas utiliser ce skill pour :
 | Dépendances | Aucun npm/yarn/pnpm, aucun `node_modules`, aucun bundler, aucun CDN, aucune police distante | `rg -i 'cdn|unpkg|jsdelivr|googleapis|npm' web` |
 | Limites | CSV 338 000 octets, scans 16 Mio, ZIP 256 Mio, index 64 Mio, métadonnées 1 Mio ; protections zip-slip/zip-bomb ; le serveur reste l'autorité | `web/config.py` et tests de refus |
 | Tmpfs | Répertoire de travail privé sous `$XDG_RUNTIME_DIR/qrcode_web_5100` ou `/dev/shm/qrcode_web_5100_<uid>`, `0700`, `umask 077`, core dumps désactivés | `web/espace_ram.py`, `lancer_interface.sh`, `web/serveur.py` |
-| Secrets | Masqués par défaut, révélation explicite, re-masquage automatique ; limites de purge et exception d'URI documentées dans les points d'audit | Revue de `consultation.js` |
-| USB | Aucun `sudo`, aucune phrase de passe, démontage uniquement via `udisksctl unmount --no-user-interaction` | `web/services/usb.py`, tests avec faux `lsblk` |
+| Secrets | Masqués par défaut, révélation explicite, re-masquage automatique ; URI rédigée, URI complète réservée à `/reveler`, purge DOM à l'expiration et à la purge | Revue de `consultation.js` et tests 401 |
+| USB | Aucun `sudo`, aucune phrase de passe, démontage uniquement via `udisksctl unmount --no-user-interaction` ; loopbacks sûrs montés inclus | `web/services/usb.py`, tests avec faux `lsblk` |
 | Langue | Interface, messages, commentaires et nommage en français | Revue |
 | Permissions | Scripts `700`, documents et sources `600` | `stat -c '%a %n'` |
 
@@ -95,7 +95,7 @@ web/templates/index.html
 | `web/static/app.js` | Amorçage, jeton du fragment, échange `POST /api/session`, `GET /api/etat`, routage des onglets, écran de session, purge globale, reprise d'une génération | Ne jamais persister le jeton ; retirer le fragment immédiatement ; n'initialiser les modules qu'une fois |
 | `web/static/ui.js` | `$`/`$$`, `icone`, `echapper`, `octets`, `toast`, `api`, `envoyer`, `confirmer`, `telecharger`, `copier`, `debounce` | Tout appel `/api` doit passer par ces helpers ; `echapper` ne remplace pas une validation serveur |
 | `web/static/modules/generation.js` | Dépôt du CSV, préflight client et serveur, suivi asynchrone, annulation, résultat et téléchargements | Limite 338 000 octets, `arrayBuffer` uniquement, interrogation périodique arrêtée et purgée |
-| `web/static/modules/consultation.js` | Sources session/dossier/ZIP, scans Binary Eye, recherche, extraction masquée, révélation, restauration | Ne jamais précharger les secrets ; minuteur de re-masquage annulé à la purge |
+| `web/static/modules/consultation.js` | Sources session/dossier/ZIP, scans Binary Eye, recherche, extraction masquée, révélation, restauration | Ne jamais précharger les secrets ; minuteur annulé à la purge ; re-masquage immédiat sur expiration |
 | `web/static/modules/usb.js` | Assistant matériel en deux étapes, cartes de périphériques, démontage assisté, confirmation d'initialisation, commandes terminal | Aucun `sudo` exécuté ; commandes de secours uniquement issues du serveur |
 | `web/static/style.css` | Charte sobre, variables CSS, responsive 980/640 px, focus visible, mouvement réduit | Aucun framework, aucune police distante, contraste conservé, mode clair forcé |
 
@@ -139,7 +139,7 @@ mais pas encore le cookie. Les réponses d'erreur API sont de la forme
 | `GET` | `/api/consultation/<session_id>` | État de la session |
 | `POST` | `/api/consultation/<session_id>/scans` | Corps JSON brut de `binary_eye_all_qr.json` |
 | `POST` | `/api/consultation/<session_id>/recherche` | `{q}` ; 50 résultats maximum |
-| `POST` | `/api/consultation/<session_id>/extraire` | `{record_id}` ; renvoie les champs visibles et les libellés masqués. L'URI est renvoyée en clair et peut contenir des identifiants intégrés |
+| `POST` | `/api/consultation/<session_id>/extraire` | `{record_id}` ; renvoie les champs visibles et les libellés masqués. L'URI visible est rédigée ; l'URI complète avec identifiants reste dans les champs masqués et exige `/reveler` |
 | `POST` | `/api/consultation/<session_id>/reveler` | `{extraction_id, ligne}` ; seule voie d'obtention des valeurs masquées |
 | `POST` | `/api/consultation/<session_id>/restaurer` | Restauration complète et verdict |
 | `GET` | `/api/consultation/<session_id>/fichier/extraction` | Téléchargement de l'extraction |
@@ -229,24 +229,31 @@ validé, jamais une URL arbitraire renvoyée par un scan.
 - Les champs classés sensibles (mot de passe, TOTP, notes, champs
   personnalisés) sont masqués par défaut par `••••••••` et leurs valeurs ne sont
   **jamais** incluses dans la réponse d'extraction initiale. Seul
-  `POST /reveler` les renvoie, après un clic explicite sur l'œil. L'URI est une
-  exception documentée ci-dessous.
+  `POST /reveler` les renvoie, après un clic explicite sur l'œil. L'URI visible
+  est rédigée par le serveur (`rediger_uri`) ; si elle contenait un couple
+  utilisateur:mot de passe, l'URI complète est ajoutée aux champs masqués et
+  n'est accessible que par `/reveler`.
 - La révélation globale (`#cons-bouton-reveler`) doit rester une action
   explicite. Ne jamais révéler au chargement, au survol, au focus ou dans un
   `title`.
 - Le minuteur de re-masquage utilise `document.body.dataset.ttl` (UX), mais la
   sécurité réelle est le TTL serveur de 60 minutes. Ne pas considérer le minuteur
   client comme une protection.
-- Lors du masquage, supprimer la valeur du DOM (`delete valeur.dataset.valeur`)
-  et remettre le libellé du bouton à « Afficher le secret ».
+- Lors du masquage, supprimer la valeur du DOM (`delete valeur.dataset.valeur`),
+  remettre `••••••••` et restaurer `aria-label="Afficher <libellé>"` à partir de
+  `bouton.dataset.libelle`.
+- `masquerSecretsConsultation()` est le point unique de re-masquage immédiat :
+  il annule le minuteur, masque tous les blocs et réinitialise le bouton global.
+  `app.js` l'appelle dans le callback `surSessionExpiree()`, avant l'écran de
+  verrouillage, en conservant `jetonMemoire`.
 - À la purge, réinitialiser les structures JavaScript des modules qui
-  détiennent des données de session : génération et consultation dans
-  l'implémentation actuelle, USB après correction du point d'audit. Annuler les
-  intervalles et minuteurs, vider les zones DOM et les messages. Le bouton
-  « Purger la session » doit purger les fichiers de travail du répertoire
-  privé sur tmpfs côté serveur et l'état côté client ; le répertoire privé est
-  supprimé à l'arrêt, mais le tmpfs sous-jacent (`/dev/shm` ou
-  `XDG_RUNTIME_DIR`) n'est pas démonté par l'application.
+  détiennent des données de session : `reinitialiserGeneration(false)`,
+  `reinitialiserConsultation()` et `reinitialiserUsb()`. Annuler les intervalles
+  et minuteurs, vider les zones DOM et les messages. Le bouton « Purger la
+  session » doit purger les fichiers de travail du répertoire privé sur tmpfs
+  côté serveur et l'état côté client ; le répertoire privé est supprimé à
+  l'arrêt, mais le tmpfs sous-jacent (`/dev/shm` ou `XDG_RUNTIME_DIR`) n'est pas
+  démonté par l'application.
 - **Interdit** : `localStorage`, `sessionStorage`, IndexedDB, cookies écrits
   par le JS, `window.name`, journalisation console, journalisation d'un corps
   de requête, URL contenant un secret, attribut `data-*` persistant.
@@ -256,35 +263,29 @@ validé, jamais une URL arbitraire renvoyée par un scan.
   doit rester visible. Ne pas lancer automatiquement un téléchargement de
   secrets. La purge ne supprime pas les fichiers déjà téléchargés (PDF, ZIP,
   CSV) : le dialogue de confirmation doit le rappeler.
-- Exception actuelle : `uri` est renvoyée en clair par `/extraire` et peut
-  contenir des identifiants intégrés. Voir les points d'audit ci-dessous.
 - Pour ajouter un champ, vérifier côté serveur `CHAMPS_SURS` et
   `LIBELLES_MASQUES` dans `web/services/consultation.py`. Le frontend ne doit
-  pas décider seul qu'un champ est sûr.
+  pas décider seul qu'un champ est sûr ; une valeur ajoutée aux champs masqués
+  doit aussi être produite par `reveler()` dans le même ordre.
 
-#### Points d'audit connus
+#### Correctifs de l'audit frontend (v1.0.1)
 
-Plusieurs écarts sont à corriger lors d'une évolution :
+Les écarts relevés par `docs/Rapport-daudit-de-securite-frontend-web.md` sont
+corrigés et couverts par des tests synthétiques :
 
-- `uri` figure dans `CHAMPS_SURS` et `extraire()` renvoie sa valeur brute. Une
-  URL de la forme `https://user:password@host` expose donc ces identifiants
-  avant tout `/reveler`. Masquer ou rédiger l'URI côté serveur (`rediger_uri`)
-  avant de la classer comme sûre.
-- `messageErreur()` dans `ui.js` ne lit que `donnees.erreur` et ignore
-  `donnees.reference`, pourtant renvoyée sur une erreur 500.
-- `purgerGeneration()` ne vide pas `#gen-fichiers`, `#gen-resultat-stats`,
-  `#gen-resultat-avertissements` ni `#gen-resume` ; seul
-  `reinitialiserGeneration()` les vide.
-- `extraire()` et `restaurer()` ne vérifient pas
-  `scans_info["manquants_total"]` ; l'interface empêche seulement de poursuivre,
-  un appel direct reste accepté.
-- Un `/dev/loopX` monté reste dans `autres` (`ecarte`) et n'a pas de bouton de
-  démontage, car `a_demonter` exige `not est_loop`.
-- `purgeGlobale()` ne réinitialise pas le cache USB (`etat.donnees`,
-  `etat.selection`, `etat.commandes`) ni les commandes affichées.
-- `surSessionExpiree()` ne re-masque pas immédiatement les secrets révélés
-  avant d'afficher l'écran de verrouillage ; conserver `jetonMemoire` pour la
-  possibilité de réessayer.
+- `extraire()` rédige `uri` et réserve l'URI complète à `/reveler` ;
+- `masquerSecretsConsultation()` re-masque immédiatement sur expiration ;
+- `extraire()` et `restaurer()` refusent un export incomplet en
+  `409 scans_incomplets` ;
+- `purgerGeneration()` vide les panneaux de résultat ; `reinitialiserUsb()`
+  purge le cache et le DOM USB lors de la purge globale ;
+- `messageErreur()` restitue `donnees.reference` ;
+- un `/dev/loopX` sûr et monté rejoint `a_demonter` et bénéficie du démontage
+  assisté ;
+- les cartes `.choix` et les boutons métiers ont un `:focus-visible` ;
+- `afficherMessage()` applique `role="alert"`/`status` et `masquerMessage()`
+  retire l'attribut ;
+- `#gen-erreur` est simplifié et les onglets appliquent le roving `tabindex`.
 
 ### 4. Jeton, session et réseau
 
@@ -315,14 +316,18 @@ Plusieurs écarts sont à corriger lors d'une évolution :
 - Conserver le lien d'évitement `.lien-evitement` en premier élément
   focusable, vers `#contenu`.
 - Les onglets utilisent `role="tablist"`, `role="tab"`, `role="tabpanel"`,
-  `aria-selected`, `aria-controls` et `aria-labelledby`. Le clavier doit gérer
-  `ArrowLeft`, `ArrowRight`, `Home` et `End`, puis activer l'onglet.
+  `aria-selected`, `aria-controls`, `aria-labelledby` et un roving `tabindex`
+  (`0` sur l'actif, `-1` sur les inactifs). Le clavier doit gérer `ArrowLeft`,
+  `ArrowRight`, `Home` et `End`, puis activer l'onglet.
 - Les zones de dépôt sont des `div` avec `role="button"`, `tabindex="0"` et
   gestion de `Enter`/`Espace` ; l'input fichier reste `hidden`.
 - Les toasts utilisent `role="status"` et `aria-live="polite"`. Les erreurs
   persistantes doivent être affichées dans un message intégré, pas uniquement
-  dans un toast. Si un message d'erreur est ajouté dynamiquement, lui donner
-  `role="alert"` ou l'insérer dans une zone `aria-live`.
+  dans un toast. `afficherMessage()` applique `role="alert"` pour une erreur et
+  `role="status"` sinon ; `masquerMessage()` retire l'attribut.
+- Le focus visible doit couvrir `.bouton`, `.onglet`, `.zone-depot`,
+  `.choix:has(input:focus-visible)`, `.dossier-detecte`, `.resultat-recherche`,
+  `.champ-masque-bouton` et `.fichier-telechargement`.
 - Les volets pliables utilisent de préférence `<details>/<summary>`. Pour un
   volet personnalisé, maintenir `aria-expanded` et `aria-controls`.
 - Le dialogue de confirmation utilise `<dialog>` et `showModal()`. Le repli
@@ -365,11 +370,12 @@ chmod 600 .agents/skills/interface-web-locale/SKILL.md
    depuis `etat.generations`.
 5. `rendreBandeau(etat)` affiche les avertissements de swap disque, WeasyPrint
    et qrencode/split sans bloquer l'interface.
-6. `surSessionExpiree()` affiche l'écran de verrouillage et propose
-   « Réessayer » uniquement si `jetonMemoire` est non vide.
+6. `surSessionExpiree()` appelle d'abord `masquerSecretsConsultation()`, puis
+   affiche l'écran de verrouillage et propose « Réessayer » uniquement si
+   `jetonMemoire` est non vide.
 7. La purge globale appelle `POST /api/purge`, `reinitialiserGeneration(false)`,
-   `reinitialiserConsultation()` et rafraîchit les sources. Ne pas oublier de
-   vider les messages, résultats et fichiers affichés.
+   `reinitialiserConsultation()`, `reinitialiserUsb()` et rafraîchit les sources.
+   Ne pas oublier de vider les messages, résultats et fichiers affichés.
 
 Toute nouvelle initialisation de module doit être ajoutée dans
 `initialiserGlobal()`/`ouvrirApplication()` et non exécutée au chargement du
@@ -422,10 +428,9 @@ module, pour éviter les accès DOM avant l'affichage de `#application`.
    et que WeasyPrint peut être absent.
 9. **Nettoyage** : `reinitialiserGeneration()` arrête l'intervalle et vide les
    champs, les statistiques, les messages et les listes de fichiers.
-   `purgerGeneration()` arrête aussi l'intervalle et supprime le job serveur,
-   mais ne vide pas encore `#gen-fichiers`, `#gen-resultat-stats`,
-   `#gen-resultat-avertissements` ni `#gen-resume` : point d'audit à corriger
-   pour éviter de laisser des métadonnées dans le DOM.
+   `purgerGeneration()` arrête aussi l'intervalle, supprime le job serveur et
+   vide `#gen-fichiers`, `#gen-resultat-stats`, `#gen-resultat-avertissements`
+   et `#gen-resume` avant de revenir à l'import.
 
 Ne jamais afficher un nom de fichier ou un libellé serveur sans `echapper()`
 lorsqu'il est interpolé dans du HTML. Ne jamais journaliser le contenu du CSV.
@@ -445,33 +450,34 @@ lorsqu'il est interpolé dans du HTML. Ne jamais journaliser le contenu du CSV.
    `Content-Type: application/json` et `X-QR-Fichier`, limite 16 Mio. Afficher
    morceaux trouvés/attendus, entrées, doublons, invalides, morceaux d'une
    autre sauvegarde et exemples manquants. Si des morceaux manquent, l'interface
-   masque la poursuite ; le serveur `extraire()` ne vérifie cependant pas
-   `scans_info["manquants_total"]`, donc un appel direct reste accepté :
-   point d'audit côté serveur.
+   masque la poursuite et le serveur refuse aussi `extraire()` et `restaurer()`
+   en `409 scans_incomplets`, y compris pour un appel API direct.
 3. **Recherche** : `debounce` de 280 ms, `POST .../recherche` avec `{q}`.
    Utiliser un compteur de séquence pour ignorer les réponses obsolètes. La
    recherche porte sur le nom (`name`/`Title`) et l'identifiant `R…` ; elle ne
    doit pas être présentée comme une recherche dans les mots de passe.
 4. **Extraction** : `POST .../extraire` avec `{record_id}`. La réponse contient
-   `extraction_id`, `lignes[].visibles` (nom, dossier, URI, identifiant) et
-   `lignes[].masques` (clé et libellé uniquement). Les mots de passe, TOTP,
-   notes et champs personnalisés ne sont pas renvoyés, mais l'URI est une
-   exception : `uri` est classée `CHAMPS_SURS` et sa valeur brute peut contenir
-   des identifiants intégrés (`https://user:password@host`). Ne pas la présenter
-   comme un champ sûr avant correction côté serveur.
+   `extraction_id`, `lignes[].visibles` (nom, dossier, URI rédigée, identifiant)
+   et `lignes[].masques` (clé et libellé uniquement). Les mots de passe, TOTP,
+   notes et champs personnalisés ne sont pas renvoyés. Si l'URI contenait un
+   couple utilisateur:mot de passe, sa version rédigée (`https://•••@hôte`) est
+   visible et l'URI complète figure parmi les masques, sous le libellé « URL
+   complète (avec identifiants) ».
 5. **Révélation** : un clic sur l'œil appelle `POST .../reveler` avec
    `{extraction_id, ligne}` pour la ligne concernée. Le bouton global révèle
    toutes les lignes une par une, puis planifie le re-masquage. Un second clic
-   masque et supprime la valeur du DOM.
+   masque et supprime la valeur du DOM. Le libellé du champ est conservé dans
+   `bouton.dataset.libelle` pour restaurer `aria-label="Afficher <libellé>"`.
 6. **Téléchargement** : `/fichier/extraction` (CSV ou ZIP multi-lignes) et
    `/fichier/restauration`. Toujours prévenir que le fichier est en clair.
 7. **Restauration** : `POST .../restaurer` renvoie `statut` :
    `identique`, `nbsp` ou `different`, avec SHA-256, tailles, enregistrements
    et parfois les SHA sans NBSP. `nbsp` est un succès ; `different` ne doit
    jamais conduire à supprimer l'original.
-8. **Purge** : `DELETE /api/consultation/<id>`, réinitialisation locale,
-   rechargement des sources. Annuler le minuteur de masquage et vider
-   `etat.extraction`.
+8. **Purge et expiration** : `DELETE /api/consultation/<id>`, réinitialisation
+   locale, rechargement des sources. Annuler le minuteur de masquage et vider
+   `etat.extraction`. Sur `401`, `masquerSecretsConsultation()` est invoqué
+   immédiatement, avant l'écran de verrouillage.
 
 Ne jamais appeler `/reveler` au chargement, lors de la recherche ou pour
 préparer un téléchargement. Ne pas conserver les valeurs révélées dans un état
@@ -493,14 +499,14 @@ commandes texte générées par le serveur, à copier dans un terminal.
 `header_age_existe`, `montages_actifs` et `mappeurs_actifs`. Le serveur lit
 `lsblk` en lecture seule et applique les garde-fous :
 
-- disque entier, taille ≥ 1 Gio, non protégé en écriture ;
-- transport USB ou indicateur amovible ;
+- disque entier ou image loopback de test, taille ≥ 1 Gio, non protégé en
+  écriture ;
+- transport USB ou indicateur amovible pour un disque physique ;
 - ni système en cours, ni swap, ni holder noyau, ni LVM/RAID/dm/crypt ;
-- pour un disque physique, une partition montée n'est pas un candidat prêt :
-  elle bascule dans `a_demonter` ;
-- un `/dev/loopX` monté n'est pas proposé au démontage : il reste dans `autres`
-  (`ecarte`), car `a_demonter` exige `not est_loop`. C'est un point d'audit du
-  parcours de test loopback.
+- une partition montée n'est pas un candidat prêt : elle bascule dans
+  `a_demonter`, y compris pour un `/dev/loopX` sûr (test loopback) ;
+- un `/dev/loopX` libre et sûr reste dans `tests` et exige le mode test
+  explicite pour générer une commande.
 
 | État serveur | Affichage | Action |
 |---|---|---|
@@ -509,8 +515,9 @@ commandes texte générées par le serveur, à copier dans un terminal.
 | `test` | badge vert « test loopback » | sélection avec mode test explicite |
 | `ecarte` | badge rouge « écarté » + raisons | aucune sélection |
 
-Ce tableau décrit les disques physiques ; un loopback monté reste écarté et
-n'ouvre pas le démontage assisté.
+Un loopback monté suit le même parcours ambre → démontage → `test`. Seuls les
+supports réunissant tous les critères de sûreté (taille, lecture seule, hors
+système, hors swap, sans holders ni LVM/RAID) entrent dans `a_demonter`.
 
 Les disques système et les supports dangereux restent dans le bloc
 « Périphériques écartés » ; ne jamais les rendre sélectionnables. Un support
@@ -527,7 +534,8 @@ ferme pas un mapper LUKS et ne déplace pas la sauvegarde d'en-tête.
    `POST /api/usb/demonter` avec `{partition}`.
 2. Le serveur revalide la partition contre l'état `lsblk` courant, jamais
    contre la seule valeur envoyée par le navigateur. Une cible qui n'appartient
-   pas à un disque amovible sûr est refusée en `403` ; le frontend affiche
+   pas à un support sûr (disque amovible ou loopback de test) est refusée en
+   `403` ; le frontend affiche
    alors uniquement le message d'erreur et **ne propose aucune commande** pour
    cette cible.
 3. Si le serveur répond `ok: true`, vider le cache `etat.donnees`, recharger
@@ -631,7 +639,7 @@ jamais demander de mot de passe administrateur.
 | Partition remontée ou en-tête existant | `409` | Recharger l'état USB / relire le garde-fou, ne pas réessayer à l'aveugle |
 | Fichier trop volumineux | `413` | Afficher la limite concernée ; ne pas réessayer avec le même fichier |
 | Validation métier | `400` | Afficher le message serveur dans la zone de message intégré |
-| Erreur interne | `500` | Le message invite à consulter le terminal avec la référence, mais `messageErreur()` ne lit pas `donnees.reference` — point d'audit |
+| Erreur interne | `500` | Le message inclut la référence d'incident issue de `donnees.reference` ; consulter le terminal du serveur avec cette référence |
 | Réseau local interrompu | — | Message « Vérifiez que ./lancer_interface.sh est toujours actif » |
 | Jeton refusé à l'échange | `403` | Écran de session : le serveur a probablement été relancé |
 
@@ -735,19 +743,25 @@ KeePassXC), puis :
 2. fabriquer un faux export Binary Eye à partir des morceaux avec l'en-tête
    `LQR1 <suffixe> <n>/<total>\n` ;
 3. importer le JSON, rechercher par nom et par `R…`, vérifier que les champs
-   masqués le sont ; vérifier aussi qu'une URI synthétique avec `user:password@`
-   est visible avant révélation (exception d'URI à corriger) ;
+   masqués le sont ; avec une URI synthétique `https://user:password@hôte`, la
+   valeur visible doit être `https://•••@hôte` et l'URI complète ne doit
+   apparaître qu'après un appel explicite à `/reveler` ;
 4. révéler un secret explicitement, vérifier le re-masquage automatique après
    le TTL (ou avec une valeur `data-ttl` réduite pour le test uniquement) ;
+   simuler un `401` et vérifier que `masquerSecretsConsultation()` efface
+   immédiatement `data-valeur` et rétablit `••••••••` ;
 5. restaurer tout le CSV et vérifier `IDENTIQUE` ainsi que le SHA-256 ;
 6. simuler la normalisation NBSP et vérifier
    `IDENTIQUE APRÈS NORMALISATION NBSP` ;
-7. tester les refus : CSV > 338 000 octets, scans > 16 Mio, ZIP > 256 Mio ;
+7. tester les refus : CSV > 338 000 octets, scans > 16 Mio, ZIP > 256 Mio, et
+   appel direct à `/extraire` ou `/restaurer` avec un export incomplet
+   (`409 scans_incomplets`) ;
 8. vérifier « Purger la session » : les fichiers de travail du répertoire privé
-   sur tmpfs et l'état JS sont purgés ;
-9. après « Tout effacer » sur une génération, vérifier que les panneaux de
-   résultat ne contiennent plus de métadonnées (point d'audit actuel de
-   `purgerGeneration()`).
+   sur tmpfs sont purgés, ainsi que les états JS génération, consultation et USB
+   (`#usb-peripheriques`, `#usb-commandes`, etc.) ;
+9. après « Tout effacer » sur une génération, vérifier que `#gen-fichiers`,
+   `#gen-resultat-stats`, `#gen-resultat-avertissements` et `#gen-resume` sont
+   vides.
 
 Ne jamais utiliser un export réel, même pour un test rapide. Ne jamais
 afficher un mot de passe synthétique hors du test ponctuel de révélation.
@@ -761,8 +775,9 @@ Vérifier :
 
 - une clé montée apparaît en ambre « Partition montée (accès verrouillé) » et
   reste hors des périphériques écartés ;
-- un loopback monté reste écarté et n'ouvre pas le démontage assisté : point
-  d'audit à couvrir si le parcours de test doit inclure ce cas ;
+- un loopback sûr et monté apparaît aussi en ambre, propose le démontage
+  assisté, puis passe en `test` après démontage ; un loopback système ou
+  dangereux reste écarté ;
 - « Démonter la partition » appelle
   `udisksctl unmount --no-user-interaction -b <partition>`, sans `sudo`, sans
   `-f` et sans `-l` ;
@@ -862,9 +877,10 @@ Le changement est terminé seulement si :
   échappé n'a été ajouté ;
 - [ ] tous les appels `/api` portent `X-QR-Web: 1` et utilisent les helpers ;
 - [ ] le jeton n'est jamais persisté et le fragment est retiré ;
-- [ ] les secrets restent masqués par défaut (hors exception d'URI documentée) ;
-  la purge globale vide génération et consultation ; le cache USB et les
-  panneaux de `purgerGeneration()` restent des points d'audit ;
+- [ ] les secrets restent masqués par défaut, l'URI est rédigée et l'URI
+  complète n'est accessible que par `/reveler` ; l'expiration et la purge
+  re-masquent immédiatement ; la purge globale vide génération, consultation et
+  USB, et `purgerGeneration()` vide ses quatre panneaux de résultat ;
 - [ ] les erreurs `401`/`403`/`409`/`413` ont le comportement attendu ;
 - [ ] l'assistant USB ne demande ni `sudo` ni phrase de passe et ne propose
   que les commandes générées par le serveur ;

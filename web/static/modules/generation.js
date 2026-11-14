@@ -103,6 +103,10 @@ async function purgerGeneration() {
   masquerMessage($("#gen-echec"));
   afficher($("#bouton-retour-apercu"), false);
   $("#gen-journal").textContent = "";
+  $("#gen-fichiers").innerHTML = "";
+  $("#gen-resultat-stats").innerHTML = "";
+  $("#gen-resultat-avertissements").innerHTML = "";
+  $("#gen-resume").textContent = "";
   afficherEtape("import");
   toast("Génération purgée de la mémoire vive.", "succes");
 }
@@ -226,11 +230,7 @@ function mettreAJourProgression(instantane) {
 }
 
 function afficherEchec(message) {
-  const zone = $("#gen-echec");
-  if (zone) {
-    zone.textContent = message;
-    zone.hidden = false;
-  }
+  afficherMessage($("#gen-echec"), message);
   afficher($("#bouton-retour-apercu"), true);
   $("#gen-progression-titre").textContent = "La génération a échoué";
   $("#bouton-annuler-generation").disabled = true;

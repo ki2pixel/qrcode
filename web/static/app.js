@@ -18,11 +18,16 @@ import {
 } from "./modules/generation.js";
 import {
   initialiserConsultation,
+  masquerSecretsConsultation,
   purgerSession,
   rafraichirSources,
   reinitialiserConsultation,
 } from "./modules/consultation.js";
-import { initialiserUsb, rafraichirPeripheriques } from "./modules/usb.js";
+import {
+  initialiserUsb,
+  rafraichirPeripheriques,
+  reinitialiserUsb,
+} from "./modules/usb.js";
 
 let jetonMemoire = "";
 let sessionOuverte = false;
@@ -156,6 +161,7 @@ function initialiserOnglets() {
         const actif = element === onglet;
         element.classList.toggle("actif", actif);
         element.setAttribute("aria-selected", actif ? "true" : "false");
+        element.setAttribute("tabindex", actif ? "0" : "-1");
       });
       Object.entries(modules).forEach(([nom, module]) => {
         afficher(module, nom === cible);
@@ -193,6 +199,7 @@ async function purgeGlobale() {
     const resultat = await api("/api/purge", { method: "POST" });
     reinitialiserGeneration(false);
     reinitialiserConsultation();
+    reinitialiserUsb();
     toast(
       `Session purgée : ${resultat.generations || 0} génération(s), ${resultat.consultations || 0} consultation(s).`,
       "succes",
@@ -218,6 +225,7 @@ function initialiserGlobal() {
     }
   });
   surSessionExpiree(() => {
+    masquerSecretsConsultation();
     if (!sessionOuverte) return;
     afficherEcranSession(
       "La session locale a expiré ou le cookie a été effacé. Vous pouvez réessayer avec le jeton de ce lancement, ou relancer ./lancer_interface.sh."

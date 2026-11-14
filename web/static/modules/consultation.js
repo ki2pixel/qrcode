@@ -488,6 +488,7 @@ function rendreExtraction(extraction) {
       bouton.className = "champ-masque-bouton";
       bouton.dataset.ligne = String(indexLigne);
       bouton.dataset.cle = champ.cle;
+      bouton.dataset.libelle = champ.libelle;
       bouton.setAttribute("aria-label", `Afficher ${champ.libelle}`);
       bouton.innerHTML = icone("oeil");
       bouton.addEventListener("click", () => basculerSecret(bouton));
@@ -558,7 +559,10 @@ function afficherBloc(bloc, visible) {
     valeur.dataset.affiche = "0";
     delete valeur.dataset.valeur;
     bouton.innerHTML = icone("oeil");
-    bouton.setAttribute("aria-label", "Afficher le secret");
+    bouton.setAttribute(
+      "aria-label",
+      `Afficher ${bouton.dataset.libelle || "le secret"}`
+    );
   }
 }
 
@@ -587,6 +591,16 @@ function annulerMasquage() {
   if (minuteurMasquage !== null) {
     window.clearTimeout(minuteurMasquage);
     minuteurMasquage = null;
+  }
+}
+
+export function masquerSecretsConsultation() {
+  annulerMasquage();
+  tousLesBlocs().forEach((element) => afficherBloc(element, false));
+  const bouton = $("#cons-bouton-reveler");
+  if (bouton) {
+    bouton.innerHTML = `${icone("oeil")} Afficher les secrets`;
+    bouton.dataset.affiche = "0";
   }
 }
 
