@@ -32,8 +32,11 @@ Audit cryptographique et d'intégrité : `docs/Audit-technique-cryptographique-e
   `sudo ./consulter_coffre_ro.sh [--device /dev/sdX] [--id R123 | --nom TEXTE | --restaurer] [--export scans.json] [--afficher] [--ram-size 512M] [--allow-loopback] /dev/sdX`
   `--ram-size` : défaut `512M`, minimum `128M`. `--id`, `--nom` et `--restaurer` sont incompatibles.
 - **Lancement des scripts USB** : toujours via `sudo` depuis un compte non-root (`SUDO_USER`) ; `sudo -i` est refusé.
+- **Interface web locale optionnelle** :
+  `./lancer_interface.sh [--strict-ram] [--no-browser]`
+  Écoute uniquement `127.0.0.1:5100`, jeton dans le fragment d'URL échangé contre un cookie local, expiration après 60 min d'inactivité. Dépendances isolées dans `.venv/` (`requirements.txt`, Flask 3.1), créé avec `--system-site-packages` pour conserver WeasyPrint/Pango/Cairo système. Le pipeline QR et les scripts d'extraction utilisent le Python système capturé par le lanceur, pas le `.venv`.
 - **Contrôle syntaxique** :
-  `python3 -m py_compile *.py && bash -n *.sh`
+  `python3 -m py_compile *.py && python3 -m compileall -q web && bash -n *.sh`
 
 ## Flux et architecture
 
@@ -59,6 +62,15 @@ Audit cryptographique et d'intégrité : `docs/Audit-technique-cryptographique-e
   - Déverrouille LUKS2 et monte la partition en lecture seule stricte (`mount -o ro,noatime,nodev,nosuid,noload`).
   - Déploie une enclave RAM pour importer les scans (`binary_eye_all_qr.json`), exécuter l'extraction ou la restauration, puis nettoie la RAM à la sortie sans jamais écrire sur la clé ni sur le SSD hôte.
 
+### 3. Interface web locale (`web/`, `lancer_interface.sh`)
+- Serveur Flask/Werkzeug lié à `127.0.0.1:5100`, sans debug ni reloader ; frontend HTML/CSS/JS vanilla sans npm ni CDN.
+- Modules : `web/services/generation.py` (préflight CSV et orchestration de `creer_sauvegarde_qr.sh`), `web/services/consultation.py` (sources session/dossier/ZIP, scans Binary Eye, extraction, restauration), `web/services/usb.py` (lecture seule `lsblk`, démontage non privilégié `udisksctl`, génération de commandes `sudo`).
+- Le générateur USB n'exécute aucune commande privilégiée et ne reçoit aucune phrase de passe LUKS2/age : il produit des commandes à copier manuellement, avec `set +o history`. Seule exception contrôlée : `POST /api/usb/demonter` exécute `udisksctl unmount -b /dev/sdXN` avec les droits de l'utilisateur, après revalidation que la partition appartient à un disque amovible sûr et que le montage est le seul obstacle. Jamais de `sudo`, ni d'option `-f`/`-l`.
+- Étape 2 USB : récapitulatif cible/état reconstruit depuis l'état `lsblk` du serveur. Les opérations non destructives (`sauvegarde`, `consulter`, `restaurer`) n'exigent ni numéro de série ni case à cocher. Seule `init` conserve une confirmation explicite, acceptant le nom court (`sde`), le chemin complet (`/dev/sde`) ou le numéro de série ; le bouton « Insérer » pré-remplit le champ. `generer_commandes()` revalide systématiquement l'absence de montage et refuse en `409 partition_montee` si une partition a été remontée.
+- Données exclusivement en tmpfs (`$XDG_RUNTIME_DIR/qrcode_web_5100` ou `/dev/shm/qrcode_web_5100_<uid>`), `umask 077`, core dumps désactivés, expiration des tâches/sessions après 60 min et purge à l'arrêt. Le bouton « Purger la session » force le nettoyage immédiat.
+- Jeton aléatoire par lancement dans le fragment d'URL (`#jeton=…`), cookie `HttpOnly`/`SameSite=Strict`, en-tête `X-QR-Web` sur `/api`, contrôle `Host`/`Origin`, CSP stricte, `Cache-Control: no-store`, journal HTTP sans query string ni secret.
+- Les archives ZIP importées ne fournissent que les trois index ; les scripts exécutés sont toujours ceux du dépôt, jamais ceux de l'archive. Téléversements CSV limités à 338 000 octets, scans à 16 Mio, ZIP à 256 Mio, avec protections zip-slip et zip-bomb.
+
 ## Pièges vérifiés
 
 - **DANGER PÉRIPHÉRIQUE /dev/sdX** : Ne JAMAIS exécuter `init_usb_coffre.sh` ou `executer_sauvegarde_ram.sh` sans vérifier formellement la lettre du disque cible (`lsblk -o NAME,MODEL,SIZE,TRAN,RM,FSTYPE`). `init_usb_coffre.sh` détruit irrémédiablement toutes les données du disque cible !
@@ -76,6 +88,10 @@ Audit cryptographique et d'intégrité : `docs/Audit-technique-cryptographique-e
 - **Plafond de segmentation** : Le pipeline gère exactement ≤ 676 morceaux (338 000 octets, suffixes `aa`…`zz`, glob `morceau_??`). `split -a 2` est obligatoire ; au-delà, le script refuse le CSV au lieu de tronquer silencieusement.
 - **Permissions POSIX** : L'index ne contient pas les mots de passe, mais les noms, URL et identifiants restent des métadonnées sensibles. Permissions attendues : scripts 700 (`rwx------`), fichiers 600 (`rw-------`).
 - **Fichiers de documentation** : `README.md` est la documentation utilisateur racine. Le `LISEZMOI.txt` généré dans chaque sauvegarde est produit par un heredoc dans `creer_sauvegarde_qr.sh`. Maintenir la cohérence entre `README.md`, `LISEZMOI.txt` et `AGENTS.md` si le flux évolue.
+- **Interface web — port et jeton** : ne jamais exposer `127.0.0.1:5100` via un proxy, un tunnel ou une écoute `0.0.0.0`. Le jeton change à chaque lancement et n'est valide que pour l'instance courante ; relancer le serveur invalide les liens et cookies précédents. Ne pas journaliser l'URL complète dans un fichier persistant.
+- **Interface web — périmètre des secrets** : les téléchargements (PDF, archive ZIP, CSV extrait/restauré) sortent volontairement du tmpfs et contiennent des données en clair. Les scans et index en RAM sont purgés à l'arrêt, mais un téléchargement déjà écrit sur disque reste. Le web ne remplace pas le flux USB anti-rémanence pour les secrets critiques.
+- **Interface web — USB** : `web/services/usb.py` lit `lsblk`, peut démonter une partition montée d'un disque amovible sûr avec `udisksctl` (sans `sudo`, sans `-f`/`-l`), puis génère des commandes. Ne jamais y ajouter d'appel à `sudo`, de réception de phrase de passe ou d'exécution privilégiée. La cible de `POST /api/usb/demonter` et celle de `POST /api/usb/commandes` doivent être revalidées à chaque appel contre l'état `lsblk` courant, jamais contre la seule entrée envoyée par le navigateur. Ne pas réintroduire de cases à cocher « vérifié/démonté » : la confirmation est réservée à `init` et le backend contrôle lui-même le montage. Un périphérique `/dev/loopX` exige la case « mode test » ; une taille RAM `2G` doit être convertie en MiB avant comparaison au minimum.
+- **Interface web — Python des sous-processus** : le pipeline QR et les scripts d'extraction doivent utiliser le Python système (`QRCODE_PYTHON_SYSTEM` capturé par `lancer_interface.sh`) et non `.venv/bin/python`, sinon WeasyPrint et ses liaisons C peuvent manquer. Le `.venv` doit rester créé avec `--system-site-packages`.
 
 ## Vérification d'un changement
 
@@ -89,6 +105,16 @@ Pas de suite de tests automatisés.
 2. **Test des scripts USB / RAM** :
    Utiliser impérativement des fichiers images temporaires loopback (`dd` ou `fallocate` + `losetup`) avec `--allow-loopback` pour valider les scripts partitionnés et LUKS2 sans risquer un disque physique. Isoler le répertoire personnel avec un utilisateur de test dédié : les scripts résolvent `REAL_HOME` via `getent passwd "$SUDO_USER"` et ignorent la variable `HOME`. Ne jamais lancer un test loopback depuis le compte qui possède une vraie sauvegarde d'en-tête : utilisez un utilisateur dédié ou déplacez temporairement `~/luks_header_qr.bak.age` avant le test.
 3. **Contrôle de syntaxe obligatoire** :
-   `python3 -m py_compile *.py && bash -n *.sh`
+   `python3 -m py_compile *.py && python3 -m compileall -q web && bash -n *.sh`
+4. **Test de l'interface web (sans USB, données synthétiques uniquement)** :
+   - lancer `./lancer_interface.sh --no-browser`, vérifier l'URL et le jeton affichés, puis `ss -ltnp | grep 5100` : seule l'adresse `127.0.0.1:5100` doit écouter ;
+   - vérifier qu'un accès à `/api/etat` sans cookie renvoie 401, et que `/` répond avec la CSP ;
+   - générer un petit CSV synthétique (Bitwarden ou KeePassXC), contrôler `IDENTIQUE` puis simuler la normalisation NBSP de Binary Eye pour obtenir `IDENTIQUE APRÈS NORMALISATION NBSP` ;
+   - tester l'extraction masquée, la révélation explicite et le téléchargement du CSV extrait/restauré ;
+   - simuler une clé amovible montée avec un faux `lsblk` placé en tête de `PATH` (jamais de disque physique) : la clé doit apparaître en ambre avec « Partition montée (accès verrouillé) », rester hors des périphériques écartés, et un clic sur « Démonter la partition » doit appeler `udisksctl unmount -b /dev/sdXN` sans `sudo` ni option `-f`/`-l` ; après démontage simulé, la carte doit passer en vert « Prête / Sûre » et ouvrir l'étape 2 ;
+   - vérifier qu'une partition du disque système est refusée en 403 sans appel à `udisksctl`, puis simuler un échec « busy » : l'encadré doit afficher la commande exacte, un bouton « Copier » et un bouton « Rafraîchir » ; simuler `udisksctl` absent et vérifier que seule la commande `sudo umount /dev/sdXN` est proposée à la copie ;
+   - vérifier l'étape 2 : récapitulatif « Cible » et « Partitions démontées » ; aucune case à cocher ; `sauvegarde`, `consulter` et `restaurer` génèrent les commandes sans confirmation. Pour `init`, vérifier la présence du champ, du bouton « Insérer » et de `lsblk -o NAME,MODEL,SERIAL /dev/sdX` ; le backend doit accepter `sde`, `/dev/sde` et le numéro de série, refuser une valeur erronée, et renvoyer `409 partition_montee` si le faux `lsblk` remonte une partition entre-temps ;
+   - vérifier que « Purger la session » détruit les fichiers du tmpfs et que l'arrêt du serveur retire le répertoire de travail.
+   Le contrôle E2E peut s'appuyer sur le client de test Flask, mais l'écoute réelle et les en-têtes doivent être vérifiés avec le lanceur. Ne jamais utiliser un export réel pour ces tests.
 
 Ne jamais lancer la génération, la restauration ou l'initialisation sur un export réel ou un support physique sans accord explicite.

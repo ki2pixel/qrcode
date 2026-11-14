@@ -1,6 +1,6 @@
 # Sauvegarde QR d’un portefeuille de mots de passe
 
-Deux commandes suffisent :
+Deux commandes suffisent pour le mode ligne de commande :
 
 ```bash
 # 1. Créer la sauvegarde complète à partir du CSV
@@ -10,6 +10,10 @@ Deux commandes suffisent :
 cd sauvegarde_qr_export_*
 python3 scripts/extraire_entree.py R123 --scans ./scans
 ```
+
+Une interface web locale optionnelle est décrite à la section 6 : elle guide
+la génération, la consultation et prépare les commandes du coffre USB sans
+jamais exécuter `sudo`.
 
 Pour un stockage à froid sur clé USB, voir la section 5
 « Coffre USB chiffré » : initialisation LUKS2, génération en RAM et
@@ -525,6 +529,105 @@ sudo mount -o ro,noatime,nodev,nosuid,noload \
   peuvent écrire des secrets sur le SSD.
 - Teste toujours une restauration complète avant de supprimer l’export CSV
   d’origine ou les planches papier.
+
+## 6. Interface web locale (optionnelle)
+
+Une interface guidée en français peut remplacer les commandes pour les
+opérations courantes. Elle reste **strictement locale** : le serveur écoute
+uniquement sur `127.0.0.1:5100` et n’ouvre aucune connexion sortante.
+
+```bash
+./lancer_interface.sh
+```
+
+Options :
+
+```bash
+./lancer_interface.sh --strict-ram   # refuse le lancement si un swap disque est actif
+./lancer_interface.sh --no-browser   # n’ouvre pas automatiquement le navigateur
+```
+
+Au premier lancement, le script crée `.venv/` avec
+`--system-site-packages`, installe Flask si nécessaire (les paquets système,
+dont WeasyPrint et ses liaisons Pango/Cairo, restent utilisés pour les PDF),
+puis affiche une URL de la forme :
+
+```text
+http://127.0.0.1:5100/#jeton=…
+```
+
+Cette installation n’est nécessaire qu’une fois ; ensuite l’interface
+fonctionne hors ligne, sans CDN ni requête sortante.
+
+Le jeton change à chaque lancement. Il est échangé contre un cookie local
+`HttpOnly`/`SameSite=Strict`, puis retiré de la barre d’adresse. Sans ce lien
+complet, l’interface refuse l’accès. Les données expirent après **60 minutes
+d’inactivité** ; le bouton **« Purger la session »** de la barre de navigation
+efface immédiatement le tmpfs sans attendre.
+
+### 6.1 Ce que fait l’interface
+
+- **Créer** : dépôt ou sélection d’un CSV, analyse avant génération (format,
+  nombre d’entrées, QR et pages, fins de ligne, NBSP), puis lancement du
+  pipeline existant. Les modes compact et confort produisent tous les deux les
+  PDF, pour rester fidèle au CLI ; « sans planches » équivaut à
+  `SANS_PLANCHES=1`. Le CSV n’est jamais écrit sur le disque.
+- **Consulter** : ouverture d’une sauvegarde de la session, d’un dossier local
+  ou d’une archive ZIP (seuls `csv/index_enregistrements.csv`,
+  `csv/index_morceaux.csv` et `json/index_meta.json` sont extraits), import de
+  `binary_eye_all_qr.json`, recherche par nom ou `R…`, extraction ciblée avec
+  secrets masqués par défaut, puis restauration complète avec verdict
+  `IDENTIQUE`, `IDENTIQUE APRÈS NORMALISATION NBSP` ou `DIFFÉRENT`.
+- **Coffre USB** : détection en lecture seule des supports (`lsblk`), contrôle
+  des garde-fous et génération des commandes `sudo` à copier dans un terminal.
+  **L’interface n’exécute jamais `sudo`**, ne reçoit aucune phrase de passe
+  LUKS2/age et ne peut donc pas lancer une opération destructive à votre place.
+  Les commandes incluent `set +o history` et les confirmations des scripts
+  restent gérées par le terminal.
+  L’étape 2 affiche un récapitulatif contrôlé par le serveur : cible
+  (`/dev/sdX`, modèle, taille) et état « Partitions démontées ». Les opérations
+  non destructives (`sauvegarde`, `consulter`, `restaurer`) ne demandent ni
+  numéro de série ni case à cocher. Seule l’**initialisation destructive**
+  exige une confirmation explicite, qui accepte indifféremment le nom court
+  (`sde`), le chemin complet (`/dev/sde`) ou le numéro de série ; un bouton
+  **« Insérer »** pré-remplit le champ et la commande de vérification
+  `lsblk -o NAME,MODEL,SERIAL /dev/sdX` est affichée sous celui-ci. Le serveur
+  revalide l’absence de montage à chaque génération : si une partition a été
+  remontée entre-temps, la demande est refusée et l’interface invite à
+  démonter puis à rafraîchir.
+- **Clé auto-montée** : si le bureau monte `URGENCE_QR` à l’insertion, la clé
+  reste visible en ambre avec le badge « Partition montée (accès verrouillé) ».
+  Le bouton « Démonter la partition » appelle `udisksctl unmount -b /dev/sdXN`
+  (ou `/dev/sdX` pour une clé montée sans table de partition) avec les droits
+  de l’utilisateur courant, sans `sudo` et sans option forcée
+  (`-f`/`-l`). La cible est revalidée côté serveur : seules les partitions d’un
+  disque amovible sûr, dont le montage est le seul obstacle, sont acceptées.
+  En cas d’échec, l’interface affiche la commande exacte à copier et un bouton
+  « Rafraîchir » ; si `udisksctl` est absent, elle propose uniquement
+  `sudo umount /dev/sdXN` à exécuter manuellement. Après démontage, la clé
+  passe en vert « Prête / Sûre » et l’étape 2 s’ouvre automatiquement.
+
+### 6.2 Sécurité et limites
+
+- Tous les téléversements et résultats restent dans un tmpfs privé
+  (`$XDG_RUNTIME_DIR/qrcode_web_5100` ou `/dev/shm/qrcode_web_5100_<uid>`),
+  avec permissions `0700`, `umask 077`, core dumps désactivés et sous-processus
+  dont `HOME`, `TMPDIR` et les caches sont redirigés vers la RAM.
+- Les secrets ne sont jamais journalisés. L’extraction masque les champs
+  sensibles ; ils ne s’affichent qu’après un clic explicite. Un téléchargement
+  de CSV extrait ou restauré sort volontairement de la RAM et contient des
+  données en clair.
+- Un swap disque actif peut recopier des pages mémoire sur le disque.
+  L’interface affiche un avertissement permanent ; `--strict-ram` refuse le
+  lancement dans ce cas. Elle ne peut pas empêcher la pagination mémoire du
+  navigateur ni sécuriser un téléchargement non chiffré.
+- L’interface ne remplace pas le flux coffre USB pour les secrets critiques :
+  pour une manipulation à froid, préférez `executer_sauvegarde_ram.sh` et
+  `consulter_coffre_ro.sh`, qui contrôlent le swap, l’imprimante et l’enclave
+  RAM de bout en bout.
+- Ne jamais exposer le port 5100 au réseau, ni ajouter un proxy inverse.
+  Le serveur refuse `0.0.0.0`, vérifie les en-têtes `Host` et `Origin`, applique
+  une CSP stricte et bloque les requêtes API sans jeton.
 
 ## Sécurité
 

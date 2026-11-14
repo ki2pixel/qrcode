@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ titre }} — Sauvegarde QR</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="page-erreur">
+  <svg class="sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <symbol id="icone-cadenas" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></symbol>
+  </svg>
+  <main class="carte-erreur">
+    <div class="sceau sceau-petit" aria-hidden="true">
+      <svg class="icone" viewBox="0 0 24 24"><use href="#icone-cadenas"></use></svg>
+    </div>
+    <p class="surtitre">Interface locale · {{ statut }}</p>
+    <h1>{{ titre }}</h1>
+    <p>{{ message }}</p>
+    {% if reference %}<p class="mono petit">Référence : {{ reference }}</p>{% endif %}
+    <p class="petit">Relancez <span class="mono">./lancer_interface.sh</span> et ouvrez le lien affiché dans le terminal.</p>
+  </main>
+</body>
+</html>

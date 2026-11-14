@@ -246,6 +246,25 @@ FORMAT D'EXPORT BINARY EYE
 JSON global uniquement : binary_eye_all_qr.json.
 Les exports CSV et TXT de Binary Eye ne sont pas utilisés.
 
+INTERFACE WEB LOCALE (OPTIONNELLE)
+----------------------------------
+Depuis le dossier racine du dépôt qrcode, une interface guidée peut ouvrir ce
+dossier de sauvegarde sans écrire sur le disque :
+
+    ./lancer_interface.sh
+
+Elle écoute uniquement sur 127.0.0.1:5100 et affiche une URL avec un jeton
+changeant à chaque lancement. Elle permet de générer une sauvegarde, d'importer
+les scans Binary Eye, de rechercher une entrée, de télécharger une extraction
+ou de restaurer le CSV. Les secrets restent masqués jusqu'à un clic explicite.
+L'interface n'exécute jamais sudo et ne remplace pas le flux coffre USB pour
+les secrets critiques. Si le bureau monte automatiquement une clé, l'assistant
+USB peut démonter sa partition avec udisksctl, sans privilèges ; sinon il
+affiche la commande exacte à copier dans un terminal. Les opérations de
+sauvegarde, consultation et restauration ne demandent aucune confirmation
+matérielle. L'initialisation destructive exige le nom, le chemin complet ou
+le numéro de série du disque, avec un bouton d'insertion assistée.
+
 SÉCURITÉ
 --------
 Les QR codes contiennent le CSV en clair, mots de passe compris.

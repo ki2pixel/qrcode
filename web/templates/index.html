@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Sauvegarde QR — interface locale</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body data-ttl="{{ ttl_secondes }}">
+  <a class="lien-evitement" href="#contenu">Aller au contenu</a>
+
+  <svg class="sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <symbol id="icone-bouclier" viewBox="0 0 24 24"><path d="M12 3 4.5 6v5.5c0 4.4 3.1 7.8 7.5 9.5 4.4-1.7 7.5-5.1 7.5-9.5V6L12 3Z"/><path d="m9 12 2 2 4-4"/></symbol>
+    <symbol id="icone-qr" viewBox="0 0 24 24"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4z"/><path d="M14 14h2v2h-2zM18 14h2v2h-2zM14 18h2v2h-2zM18 18h2v2h-2z"/></symbol>
+    <symbol id="icone-loupe" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 4.5 4.5"/></symbol>
+    <symbol id="icone-cle" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="m11 12 8-8M16 7l2 2M14 9l2 2"/></symbol>
+    <symbol id="icone-usb" viewBox="0 0 24 24"><path d="M12 3v13M9 6l3-3 3 3M7 13l5-3 5 3M8 19h8"/><rect x="6" y="19" width="12" height="2" rx="1"/></symbol>
+    <symbol id="icone-telecharger" viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></symbol>
+    <symbol id="icone-copier" viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h2"/></symbol>
+    <symbol id="icone-oeil" viewBox="0 0 24 24"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6S2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="2.8"/></symbol>
+    <symbol id="icone-oeil-barre" viewBox="0 0 24 24"><path d="M3 3l18 18M10.6 6.2A9.7 9.7 0 0 1 12 6c6 0 9.5 6 9.5 6a16 16 0 0 1-3.2 3.8M6.2 7.5A16.6 16.6 0 0 0 2.5 12s3.5 6 9.5 6c1.2 0 2.3-.2 3.3-.6"/></symbol>
+    <symbol id="icone-corbeille" viewBox="0 0 24 24"><path d="M4 7h16M9 7V5h6v2M7 7l1 13h8l1-13M10 11v5M14 11v5"/></symbol>
+    <symbol id="icone-rafraichir" viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14-4L4 9M4 4v5h5M4 13a8 8 0 0 0 14 4l2-2M20 20v-5h-5"/></symbol>
+    <symbol id="icone-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="icone-alerte" viewBox="0 0 24 24"><path d="M12 3 2.8 20h18.4L12 3Z"/><path d="M12 9v5M12 17.5v.1"/></symbol>
+    <symbol id="icone-croix" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+    <symbol id="icone-chevron" viewBox="0 0 24 24"><path d="m8 10 4 4 4-4"/></symbol>
+    <symbol id="icone-cadenas" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></symbol>
+    <symbol id="icone-imprimante" viewBox="0 0 24 24"><path d="M7 8V4h10v4M7 17H4V9h16v8h-3M7 14h10v6H7z"/></symbol>
+    <symbol id="icone-fichier" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v5h5"/></symbol>
+    <symbol id="icone-dossier" viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v11H3z"/></symbol>
+    <symbol id="icone-archive" viewBox="0 0 24 24"><path d="M4 4h16v5H4zM5 9h14v11H5zM10 13h4"/></symbol>
+    <symbol id="icone-terminal" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/></symbol>
+    <symbol id="icone-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8v.1"/></symbol>
+    <symbol id="icone-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="icone-horloge" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="icone-disque" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="12" cy="12" r="3"/><path d="M7 7h.1M7 17h.1"/></symbol>
+  </svg>
+
+  <div id="ecran-session" class="ecran-session">
+    <div class="carte carte-session">
+      <div class="sceau" aria-hidden="true"><svg class="icone"><use href="#icone-bouclier"></use></svg></div>
+      <p class="surtitre">Interface locale · 127.0.0.1</p>
+      <h1>Session protégée</h1>
+      <p id="message-session">Ouverture de la session locale…</p>
+      <button id="bouton-reessayer" class="bouton bouton-principal" type="button">Réessayer</button>
+      <p class="petit">Le lien complet est affiché dans le terminal par <span class="mono">./lancer_interface.sh</span>. Le jeton change à chaque lancement.</p>
+    </div>
+  </div>
+
+  <div id="application" hidden>
+    <header class="entete">
+      <a class="marque" href="#contenu" aria-label="Sauvegarde QR, retour au contenu">
+        <span class="logo" aria-hidden="true"><svg class="icone"><use href="#icone-qr"></use></svg></span>
+        <span>
+          <strong>Sauvegarde QR</strong>
+          <small>coffre local · mode guidé</small>
+        </span>
+      </a>
+      <nav class="onglets" role="tablist" aria-label="Modules">
+        <button class="onglet actif" type="button" role="tab" id="onglet-generation" aria-controls="module-generation" data-module="generation" aria-selected="true">
+          <svg class="icone"><use href="#icone-qr"></use></svg><span>Créer</span>
+        </button>
+        <button class="onglet" type="button" role="tab" id="onglet-consultation" aria-controls="module-consultation" data-module="consultation" aria-selected="false">
+          <svg class="icone"><use href="#icone-loupe"></use></svg><span>Consulter</span>
+        </button>
+        <button class="onglet" type="button" role="tab" id="onglet-usb" aria-controls="module-usb" data-module="usb" aria-selected="false">
+          <svg class="icone"><use href="#icone-usb"></use></svg><span>Coffre USB</span>
+        </button>
+      </nav>
+      <div class="entete-actions">
+        <span class="badge-local" title="Écoute strictement locale"><svg class="icone"><use href="#icone-cadenas"></use></svg> 127.0.0.1:{{ port }}</span>
+        <button id="bouton-purge-global" class="bouton bouton-danger bouton-petit" type="button" title="Purger la session maintenant">
+          <svg class="icone"><use href="#icone-corbeille"></use></svg> Purger la session
+        </button>
+      </div>
+    </header>
+
+    <div id="bandeau-hygiene" class="bandeau" hidden></div>
+
+    <main id="contenu" class="contenu">
+      <section id="module-generation" class="module" role="tabpanel" aria-labelledby="onglet-generation">
+        <div class="entete-module">
+          <p class="surtitre">Assistant guidé · sauvegarde papier</p>
+          <h1 id="titre-generation">Créer mes QR codes</h1>
+          <p class="chapeau">Déposez votre export de mots de passe. L'interface vérifie le format, estime le nombre de QR et lance le pipeline existant, sans jamais écrire le CSV sur le disque.</p>
+        </div>
+
+        <ol class="fil-etapes" id="etapes-generation" aria-label="Étapes de génération">
+          <li data-etape="import" class="actif"><span>1</span>Importer</li>
+          <li data-etape="apercu"><span>2</span>Vérifier</li>
+          <li data-etape="progression"><span>3</span>Générer</li>
+          <li data-etape="resultat"><span>4</span>Télécharger</li>
+        </ol>
+
+        <div class="carte" id="gen-etape-import">
+          <div id="zone-depot" class="zone-depot" tabindex="0" role="button" aria-describedby="aide-depot">
+            <svg class="icone icone-grand"><use href="#icone-fichier"></use></svg>
+            <strong>Glissez votre export CSV ici</strong>
+            <span>ou cliquez pour choisir un fichier</span>
+            <input type="file" id="fichier-csv" accept=".csv,text/csv" hidden>
+          </div>
+          <p id="aide-depot" class="aide">Formats Bitwarden, KeePassXC ou colonnes génériques. Limite stricte : {{ limite_csv }} octets, 676 QR maximum. Le fichier est lu en mémoire vive.</p>
+          <div id="gen-fichier-choisi" class="fichier-choisi" hidden>
+            <svg class="icone"><use href="#icone-fichier"></use></svg>
+            <div><strong id="gen-nom-fichier"></strong><span id="gen-taille-fichier"></span></div>
+            <button id="bouton-remplacer-fichier" class="bouton bouton-secondaire bouton-petit" type="button">Remplacer</button>
+          </div>
+          <div id="gen-analyse-en-cours" class="chargement" hidden><span class="rouage" aria-hidden="true"></span> Analyse du CSV en mémoire…</div>
+          <div id="gen-erreur" class="message erreur" hidden><strong>Impossible d'analyser ce fichier.</strong><p id="gen-erreur-message"></p></div>
+        </div>
+
+        <div class="carte" id="gen-etape-apercu" hidden>
+          <div class="ligne-titre">
+            <h2>Vérification avant génération</h2>
+            <span class="badge badge-vert" id="gen-badge-format"></span>
+          </div>
+          <div class="grille-stats" id="gen-stats"></div>
+          <div id="gen-avertissements" class="pile-messages"></div>
+          <h3>Mise en page</h3>
+          <p class="aide">Compact et confort génèrent tous les deux les PDF, pour rester fidèle au CLI. Le format choisi est mis en avant ; « sans planches » accélère la génération.</p>
+          <div class="choix-cartes" id="gen-layouts">
+            <label class="choix">
+              <input type="radio" name="mise-en-page" value="compact" checked>
+              <span class="choix-titre">Compact <em>recommandé</em></span>
+              <span class="choix-detail">4×5 QR par page A4, 38 mm. Idéal pour la plupart des imprimantes.</span>
+            </label>
+            <label class="choix">
+              <input type="radio" name="mise-en-page" value="confort">
+              <span class="choix-titre">Confort</span>
+              <span class="choix-detail">3×4 QR par page, 54 mm. Plus facile à scanner, plus de pages.</span>
+            </label>
+            <label class="choix">
+              <input type="radio" name="mise-en-page" value="aucune">
+              <span class="choix-titre">Sans planches</span>
+              <span class="choix-detail">QR individuels, index et HTML. Le plus rapide, sans WeasyPrint.</span>
+            </label>
+          </div>
+          <div class="actions">
+            <button id="bouton-generer" class="bouton bouton-principal" type="button"><svg class="icone"><use href="#icone-qr"></use></svg> Générer la sauvegarde</button>
+            <button id="bouton-changer-fichier" class="bouton bouton-secondaire" type="button">Changer de fichier</button>
+          </div>
+        </div>
+
+        <div class="carte" id="gen-etape-progression" hidden>
+          <div class="ligne-titre"><h2 id="gen-progression-titre">Génération en cours…</h2><span class="mono" id="gen-pourcentage">0 %</span></div>
+          <progress id="gen-progression" max="100" value="0" aria-label="Progression de la génération">0 %</progress>
+          <p class="etape-courante" id="gen-etape">Préparation</p>
+          <p class="aide">Les QR, PDF et l'archive restent dans un tmpfs privé. Ne fermez pas cet onglet avant la fin.</p>
+          <details class="details-techniques"><summary>Journal technique</summary><pre id="gen-journal"></pre></details>
+          <div id="gen-echec" class="message erreur" hidden></div>
+          <div class="actions">
+            <button id="bouton-annuler-generation" class="bouton bouton-secondaire" type="button">Annuler la génération</button>
+            <button id="bouton-retour-apercu" class="bouton bouton-principal" type="button" hidden>Revenir à la vérification</button>
+          </div>
+        </div>
+
+        <div class="carte carte-succes" id="gen-etape-resultat" hidden>
+          <div class="sceau sceau-succes" id="gen-sceau" aria-hidden="true"><svg class="icone"><use href="#icone-check"></use></svg></div>
+          <p class="surtitre">Sauvegarde vérifiée</p>
+          <h2>Sauvegarde prête</h2>
+          <p id="gen-resume"></p>
+          <div class="grille-stats" id="gen-resultat-stats"></div>
+          <div id="gen-resultat-avertissements" class="pile-messages"></div>
+          <div id="gen-fichiers" class="liste-fichiers"></div>
+          <div class="actions">
+            <button id="bouton-nouvelle-generation" class="bouton bouton-principal" type="button"><svg class="icone"><use href="#icone-plus"></use></svg> Nouvelle génération</button>
+            <button id="bouton-purger-generation" class="bouton bouton-danger" type="button"><svg class="icone"><use href="#icone-corbeille"></use></svg> Tout effacer</button>
+          </div>
+          <details class="details-techniques">
+            <summary>Comment imprimer et vérifier ?</summary>
+            <ol class="liste-aide">
+              <li>Imprimez d'abord la page de test à 100 %, sans « ajuster à la page ».</li>
+              <li>Scannez les 8 QR avec Binary Eye, sans traduction automatique.</li>
+              <li>Si le test réussit, imprimez le format choisi puis l'index de recherche.</li>
+              <li>Conservez l'archive ZIP avec les planches : elle contient les index nécessaires à la restauration.</li>
+            </ol>
+          </details>
+        </div>
+      </section>
+
+      <section id="module-consultation" class="module" role="tabpanel" hidden aria-labelledby="onglet-consultation">
+        <div class="entete-module">
+          <p class="surtitre">Assistant guidé · récupération</p>
+          <h1 id="titre-consultation">Retrouver un mot de passe</h1>
+          <p class="chapeau">Choisissez une sauvegarde, importez l'export JSON de Binary Eye, puis recherchez une entrée. Les secrets restent masqués jusqu'à votre clic.</p>
+        </div>
+
+        <ol class="fil-etapes" id="etapes-consultation" aria-label="Étapes de consultation">
+          <li data-etape="source" class="actif"><span>1</span>Sauvegarde</li>
+          <li data-etape="scans"><span>2</span>Scans</li>
+          <li data-etape="recherche"><span>3</span>Recherche</li>
+          <li data-etape="resultat"><span>4</span>Résultat</li>
+        </ol>
+
+        <div class="carte" id="cons-etape-source">
+          <h2>1. Choisir la sauvegarde</h2>
+          <div id="cons-sources-session" class="pile-sources"></div>
+          <div class="grille-sources">
+            <div class="source-carte">
+              <h3><svg class="icone"><use href="#icone-dossier"></use></svg> Dossier local</h3>
+              <p class="aide">La sauvegarde est lue en lecture seule ; seuls les trois index sont copiés en RAM.</p>
+              <div id="cons-dossiers-detectes" class="liste-dossiers"></div>
+              <label class="champ">Chemin de la sauvegarde
+                <input id="cons-chemin" type="text" placeholder="/home/moi/sauvegarde_qr_export_20260101_120000" autocomplete="off" spellcheck="false">
+              </label>
+              <button id="cons-bouton-dossier" class="bouton bouton-secondaire" type="button">Ouvrir ce dossier</button>
+            </div>
+            <div class="source-carte">
+              <h3><svg class="icone"><use href="#icone-archive"></use></svg> Archive ZIP</h3>
+              <p class="aide">Importez l'archive téléchargée depuis l'interface. Seuls les index sont extraits, dans le tmpfs.</p>
+              <input type="file" id="cons-fichier-zip" accept=".zip,application/zip">
+              <button id="cons-bouton-zip" class="bouton bouton-secondaire" type="button">Importer l'archive</button>
+            </div>
+          </div>
+          <div id="cons-erreur-source" class="message erreur" hidden></div>
+        </div>
+
+        <div class="carte" id="cons-etape-scans" hidden>
+          <div class="ligne-titre"><h2>2. Importer les scans Binary Eye</h2><button id="cons-bouton-changer-source" class="bouton bouton-secondaire bouton-petit" type="button">Changer de sauvegarde</button></div>
+          <div id="cons-source-resume" class="resume-source"></div>
+          <div id="zone-depot-scans" class="zone-depot" tabindex="0" role="button" aria-describedby="aide-scans">
+            <svg class="icone icone-grand"><use href="#icone-fichier"></use></svg>
+            <strong>Déposez binary_eye_all_qr.json</strong>
+            <span>ou cliquez pour choisir le fichier</span>
+            <input type="file" id="cons-fichier-scans" accept=".json,application/json" hidden>
+          </div>
+          <p id="aide-scans" class="aide">Export JSON global uniquement. Les exports CSV/TXT et les scans traduits automatiquement sont refusés.</p>
+          <div id="cons-nom-scans" class="fichier-choisi" hidden></div>
+          <div id="cons-scans-info" class="pile-messages"></div>
+          <div id="cons-erreur-scans" class="message erreur" hidden></div>
+        </div>
+
+        <div class="carte" id="cons-etape-recherche" hidden>
+          <h2>3. Retrouver une entrée</h2>
+          <label class="champ champ-recherche">Nom du service ou identifiant R…
+            <input id="cons-recherche" type="search" placeholder="ex. example.com ou R123" autocomplete="off" spellcheck="false">
+          </label>
+          <p class="aide" id="cons-resultats-info">Saisissez au moins un caractère. La recherche porte sur le nom (name/Title) et l'identifiant.</p>
+          <div id="cons-resultats" class="resultats-recherche"></div>
+
+          <div id="cons-detail" hidden>
+            <div class="ligne-titre"><h3 id="cons-detail-titre"></h3><span class="badge badge-neutre">Extraction en RAM</span></div>
+            <dl class="metadonnees" id="cons-detail-metadonnees"></dl>
+            <div class="actions">
+              <button id="cons-bouton-reveler" class="bouton bouton-principal" type="button"><svg class="icone"><use href="#icone-oeil"></use></svg> Afficher les secrets</button>
+              <button id="cons-bouton-telecharger-entree" class="bouton bouton-secondaire" type="button"><svg class="icone"><use href="#icone-telecharger"></use></svg> Télécharger le CSV extrait</button>
+            </div>
+            <p class="aide attention-texte">Le CSV extrait contient le mot de passe en clair. Ne le téléchargez que si nécessaire.</p>
+            <div id="cons-champs-masques" class="champs-masques"></div>
+            <div id="cons-erreur-extraction" class="message erreur" hidden></div>
+          </div>
+
+          <div class="bloc-restauration">
+            <h3><svg class="icone"><use href="#icone-bouclier"></use></svg> Restauration complète</h3>
+            <p class="aide">Reconstitue le CSV entier depuis les scans et vérifie le SHA-256. Un résultat « DIFFÉRENT » ne doit pas conduire à supprimer l'original.</p>
+            <button id="cons-bouton-restaurer" class="bouton bouton-secondaire" type="button">Restaurer tout le CSV</button>
+            <div id="cons-restauration-resultat" class="resultat-restauration" hidden></div>
+          </div>
+
+          <div class="actions actions-fin">
+            <button id="cons-bouton-purger" class="bouton bouton-danger bouton-petit" type="button"><svg class="icone"><use href="#icone-corbeille"></use></svg> Purger cette session</button>
+          </div>
+          <div id="cons-erreur-globale" class="message erreur" hidden></div>
+        </div>
+      </section>
+
+      <section id="module-usb" class="module" role="tabpanel" hidden aria-labelledby="onglet-usb">
+        <div class="entete-module">
+          <p class="surtitre">Assistant guidé · stockage à froid</p>
+          <h1 id="titre-usb">Coffre USB chiffré</h1>
+          <p class="chapeau">Le web ne lance jamais sudo et ne voit jamais vos phrases de passe. Il identifie les supports, vérifie les garde-fous et prépare les commandes exactes à coller dans un terminal.</p>
+        </div>
+
+        <div class="frise" aria-label="Parcours coffre USB">
+          <div><span>1</span><strong>Vérifier</strong><small>support et dépendances</small></div>
+          <div><span>2</span><strong>Initialiser</strong><small>LUKS2 + secours</small></div>
+          <div><span>3</span><strong>Sauvegarder</strong><small>génération en RAM</small></div>
+          <div><span>4</span><strong>Consulter</strong><small>lecture seule</small></div>
+        </div>
+
+        <div class="carte">
+          <div class="ligne-titre"><h2>1. Vérifier le support</h2><button id="usb-bouton-rafraichir" class="bouton bouton-secondaire bouton-petit" type="button"><svg class="icone"><use href="#icone-rafraichir"></use></svg> Rafraîchir</button></div>
+          <p class="aide">La détection est en lecture seule. Une clé dont la partition est montée apparaît en ambre : l'interface peut la démonter avec <code>udisksctl</code>, sans sudo. Les disques système ou participants à un volume LVM/RAID restent refusés.</p>
+          <div id="usb-dependances" class="dependances"></div>
+          <div id="usb-peripheriques" class="peripheriques"></div>
+          <div id="usb-erreur" class="message erreur" hidden></div>
+        </div>
+
+        <div class="carte" id="usb-etape-operation" hidden>
+          <h2>2. Choisir l'opération</h2>
+          <div id="usb-appareil-selectionne" class="recap-usb"></div>
+          <div class="choix-cartes" id="usb-operations">
+            <label class="choix"><input type="radio" name="usb-operation" value="init"><span class="choix-titre">Initialiser</span><span class="choix-detail">DESTRUCTIF. Crée LUKS2, ext4 et la partition de secours.</span></label>
+            <label class="choix"><input type="radio" name="usb-operation" value="sauvegarde"><span class="choix-titre">Sauvegarder</span><span class="choix-detail">Pipeline QR en RAM, capsule age, par2, transfert vers le coffre.</span></label>
+            <label class="choix"><input type="radio" name="usb-operation" value="consulter"><span class="choix-titre">Consulter</span><span class="choix-detail">Montage strictement en lecture seule et extraction ciblée.</span></label>
+            <label class="choix"><input type="radio" name="usb-operation" value="restaurer"><span class="choix-titre">Restaurer</span><span class="choix-detail">Reconstitution complète du CSV et vérification SHA-256.</span></label>
+          </div>
+
+          <div id="usb-options-init" class="options-usb" hidden>
+            <h3>Options d'initialisation</h3>
+            <div class="grille-formulaire">
+              <label class="champ">Mémoire Argon2id (MiB)<input id="usb-argon2-mib" type="number" min="256" max="8192" step="256" placeholder="2048"></label>
+              <label class="champ">Threads Argon2id<input id="usb-argon2-threads" type="number" min="1" max="32" placeholder="4"></label>
+            </div>
+          </div>
+
+          <div id="usb-options-sauvegarde" class="options-usb" hidden>
+            <h3>Options de sauvegarde</h3>
+            <div class="grille-formulaire">
+              <label class="champ">Taille du tmpfs<input id="usb-ram-size" type="text" placeholder="2G"></label>
+              <label class="case"><input id="usb-no-print" type="checkbox"> Ne pas proposer l'impression</label>
+              <label class="case"><input id="usb-garder-source" type="checkbox"> Garder le CSV source externe</label>
+              <label class="case"><input id="usb-sans-csv" type="checkbox" checked> Export direct en RAM (recommandé)</label>
+            </div>
+            <label class="champ" id="usb-csv-champ" hidden>Chemin absolu du CSV existant (déconseillé)<input id="usb-csv-path" type="text" placeholder="/mnt/ram_sec/travail/export.csv" autocomplete="off" spellcheck="false"></label>
+          </div>
+
+          <div id="usb-options-consulter" class="options-usb" hidden>
+            <h3>Options de consultation</h3>
+            <div class="grille-formulaire">
+              <label class="champ">Taille du tmpfs<input id="usb-ram-size-consulter" type="text" placeholder="512M"></label>
+              <label class="champ">Action
+                <select id="usb-action">
+                  <option value="menu">Menu interactif</option>
+                  <option value="id">Extraire par identifiant R…</option>
+                  <option value="nom">Extraire par nom</option>
+                  <option value="restaurer">Restaurer tout le CSV</option>
+                </select>
+              </label>
+              <label class="champ" id="usb-record-id-champ" hidden>Identifiant<input id="usb-record-id" type="text" placeholder="R123" autocomplete="off" spellcheck="false"></label>
+              <label class="champ" id="usb-nom-champ" hidden>Nom du service<input id="usb-nom" type="text" placeholder="example.com" autocomplete="off" spellcheck="false"></label>
+              <label class="champ">Export JSON Binary Eye (facultatif)<input id="usb-export-path" type="text" placeholder="/chemin/binary_eye_all_qr.json" autocomplete="off" spellcheck="false"></label>
+              <label class="case" id="usb-afficher-champ" hidden><input id="usb-afficher" type="checkbox"> Afficher le mot de passe dans le terminal (--afficher)</label>
+            </div>
+          </div>
+
+          <div id="usb-options-restaurer" class="options-usb" hidden>
+            <h3>Options de restauration</h3>
+            <div class="grille-formulaire">
+              <label class="champ">Taille du tmpfs<input id="usb-ram-size-restaurer" type="text" placeholder="512M"></label>
+              <label class="champ">Export JSON Binary Eye (facultatif)<input id="usb-export-path-restaurer" type="text" placeholder="/chemin/binary_eye_all_qr.json" autocomplete="off" spellcheck="false"></label>
+            </div>
+          </div>
+
+          <div id="usb-champs-communs" class="options-usb" hidden>
+            <div id="usb-confirmation-bloc" class="bloc-confirmation" hidden>
+              <div class="champ-ligne">
+                <label class="champ">Confirmation obligatoire pour l'initialisation
+                  <input id="usb-confirmation" type="text" autocomplete="off" spellcheck="false" placeholder="Nom, chemin ou numéro de série" aria-describedby="usb-confirmation-aide">
+                </label>
+                <button id="usb-bouton-inserer" class="bouton bouton-secondaire" type="button">Insérer</button>
+              </div>
+              <p id="usb-confirmation-aide" class="aide">Valeurs acceptées : nom court (<code>sde</code>), chemin complet (<code>/dev/sde</code>) ou numéro de série. Vérifiez avec <code id="usb-commande-verification">lsblk -o NAME,MODEL,SERIAL /dev/sdX</code>.</p>
+            </div>
+            <label class="case" id="usb-mode-test-label" hidden><input id="usb-mode-test" type="checkbox"> Mode test loopback (images /dev/loopX uniquement)</label>
+            <button id="usb-bouton-generer" class="bouton bouton-principal" type="button"><svg class="icone"><use href="#icone-terminal"></use></svg> Générer les commandes</button>
+            <div id="usb-erreur-operation" class="message erreur" hidden></div>
+          </div>
+        </div>
+
+        <div class="carte" id="usb-etape-commandes" hidden>
+          <h2>3. Copier et exécuter dans un terminal</h2>
+          <p class="aide">Le web ne lance rien. Ouvrez un terminal, collez les commandes dans l'ordre et lisez les confirmations demandées par les scripts.</p>
+          <div id="usb-commandes" class="commandes"></div>
+          <div id="usb-checkliste" class="checklist"></div>
+          <div id="usb-avertissements" class="pile-messages"></div>
+          <div class="actions"><button id="usb-bouton-changer" class="bouton bouton-secondaire" type="button">Changer d'opération</button></div>
+        </div>
+
+        <div class="carte carte-aide">
+          <h2><svg class="icone"><use href="#icone-info"></use></svg> Pourquoi le web n'exécute pas les commandes</h2>
+          <p>Les scripts USB demandent des confirmations destructives, une phrase de passe LUKS2, une phrase age et parfois une interaction avec CUPS. Les exécuter via un serveur web imposerait de transmettre ces secrets au navigateur ou de créer un helper privilégié.</p>
+          <p>Le mode guidé conserve donc la sécurité du terminal : vous vérifiez le disque, vous collez la commande, et les scripts gardent la main sur les confirmations et l'effacement.</p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="pied">
+      <p><svg class="icone"><use href="#icone-cadenas"></use></svg> Interface locale · <span class="mono">127.0.0.1:{{ port }}</span> · aucune connexion externe · <span id="pied-version">v{{ version }}</span></p>
+      <p class="petit">Les données restent en mémoire vive. Les fichiers téléchargés sortent volontairement de la zone RAM : stockez-les dans un coffre.</p>
+    </footer>
+  </div>
+
+  <dialog id="dialogue-confirmation" class="dialogue">
+    <form method="dialog">
+      <p class="surtitre">Confirmation</p>
+      <h2 id="dialogue-titre">Confirmer</h2>
+      <p id="dialogue-message"></p>
+      <div class="actions">
+        <button value="annuler" class="bouton bouton-secondaire" type="submit">Annuler</button>
+        <button value="confirmer" id="dialogue-confirmer" class="bouton bouton-danger" type="submit">Confirmer</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="zone-toasts" class="zone-toasts" role="status" aria-live="polite"></div>
+
+  <script type="module" src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
