@@ -35,7 +35,8 @@ Sous Linux, la lettre attribuée à une clé USB (`sde`, `sdf`, etc.) n'est **ja
    ```
    *(En remplaçant `sdX2` par votre lettre réelle, par ex. `sdf2`).*
    L'interface web locale (section 6 du `README.md`) détecte ce montage
-   automatique et propose le même démontage avec `udisksctl`, sans `sudo`.
+   automatique et propose un démontage non privilégié avec
+   `udisksctl unmount --no-user-interaction -b /dev/sdX2`, sans `sudo`.
 
 3. Pour une initialisation, vérifiez aussi que la clé offre au moins 1 Gio,
    qu'aucune de ses partitions n'est montée et que

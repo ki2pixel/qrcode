@@ -52,7 +52,7 @@ tests d'exécution.
 |---|---|---|---|---|
 | `README.md` | Opérateur humain | Guide utilisateur complet | Commandes, drapeaux, défauts, limites, avertissements `lsblk`, notation de disque physique | Instructions de test réservées aux agents |
 | `AGENTS.md` | Agent IA | Garde-fous et invariants | Limites exactes, chemins, statuts, règles de test synthétique, `$LOOP` | Commandes destinées à un disque physique réel |
-| Heredoc `LISEZMOI.txt` | Opérateur hors ligne | Secours papier/embarqué | Limite QR, en-tête `LQR1`, JSON global, statuts, masquage des mots de passe | Détails USB non nécessaires à la récupération QR |
+| Heredoc `LISEZMOI.txt` | Opérateur hors ligne | Secours papier/embarqué | Limite QR, en-tête `LQR1`, JSON global, statuts, masquage des mots de passe, rappel web court (port, jeton, absence de `sudo`) | Détails USB non nécessaires à la récupération QR |
 | Heredoc `scans/LISEZMOI.txt` | Opérateur devant le dossier `scans/` | Rappel court | `binary_eye_all_qr.json`, format `LQR1`, refus des traductions | Procédure complète |
 | `docs/*.md` | Opérateur avancé | Détail et historique | Procédures détaillées, contexte | Statut de source normative |
 
@@ -68,6 +68,28 @@ La distinction est entérinée :
 - Ne jamais recopier une commande de disque physique dans un `SKILL.md`.
 - Le `LISEZMOI.txt` QR ne cible aucun disque : il ne doit pas introduire de
   commande USB ambiguë.
+
+### Interface web
+
+L'interface web locale est une surface supplémentaire depuis la version 1.0.
+Les trois sources normatives doivent rester alignées sur :
+
+- l'écoute strictement locale `127.0.0.1:5100`, jamais `0.0.0.0` ;
+- le jeton de fragment `#jeton=…` échangé contre un cookie
+  `HttpOnly`/`SameSite=Strict`, avec expiration des données après 60 min
+  d'inactivité ;
+- l'absence de `sudo` dans le serveur : `POST /api/usb/demonter` exécute
+  uniquement `udisksctl unmount --no-user-interaction -b /dev/sdXN`, sans
+  `-f`/`-l` ; les autres opérations USB ne produisent que des commandes à
+  copier ;
+- les plafonds de téléversement : CSV 338 000 octets, scans 16 Mio, ZIP
+  256 Mio, index 64 Mio et métadonnées 1 Mio ;
+- les contrôles `Host` et `Origin` des requêtes mutantes, l'en-tête
+  `X-QR-Web` et l'absence de secrets dans les journaux.
+
+Le heredoc principal ne doit conserver qu'un rappel court de l'interface web :
+port, jeton, absence de `sudo` et démontage `udisksctl`. Les commandes USB
+complètes restent dans `README.md` et `AGENTS.md`.
 
 ## Invariants stricts
 
@@ -92,6 +114,10 @@ La distinction est entérinée :
 | Parité | `par2` 15 % | README, AGENTS, docs, code | `rg 'par2 create -r15'` |
 | En-tête | `luks_header_qr.bak.age`, chiffré par `age` | README, AGENTS, docs, code | `rg 'luksHeaderBackup\|age -p'` |
 | Lecture seule | `cryptsetup open --readonly`, `ro,noatime,nodev,nosuid,noload` | README, AGENTS, docs, code | `rg 'readonly\|noload'` |
+| Web — écoute | `127.0.0.1:5100` uniquement, jamais `0.0.0.0` | README, AGENTS, LISEZMOI | `rg '127\.0\.0\.1:5100'` et revue de `HOTE` |
+| Web — session | Jeton de fragment, cookie `HttpOnly`/`SameSite=Strict`, 60 min | README, AGENTS, code | `rg 'TTL_SECONDES'` et revue de `serveur.py` |
+| Web — privilèges | `udisksctl unmount --no-user-interaction -b`, aucun `sudo` exécuté | README, AGENTS, LISEZMOI, code | `rg 'no-user-interaction'` et revue de `usb.py` |
+| Web — limites | CSV 338 000 octets, scans 16 Mio, ZIP 256 Mio | README, AGENTS, code | `rg 'LIMITE_' web/config.py` |
 
 Le `LISEZMOI.txt` principal est un guide QR : les invariants LUKS2/USB sont
 portés par `README.md`, `AGENTS.md` et les documents secondaires. Ne pas
@@ -257,6 +283,15 @@ trompe pas l'opérateur sur l'état actuel.
 Le rapport final doit citer les fichiers modifiés, les tests exécutés et le
 résultat du `LISEZMOI.txt` rendu. Aucun secret réel ne doit y apparaître.
 
+### 8. Vérifier l'interface web
+
+Si le changement touche `web/`, `lancer_interface.sh` ou le paragraphe web du
+`LISEZMOI.txt`, exécuter la procédure de `AGENTS.md` section « Vérification
+d'un changement », point 4, avec des données synthétiques. Contrôler au
+minimum : écoute `127.0.0.1:5100`, 401 sans cookie, CSP sur `/`, plafonds de
+téléversement et commande exacte
+`udisksctl unmount --no-user-interaction -b`.
+
 ## Pièges et anti-patrons
 
 - Modifier un `LISEZMOI.txt` généré au lieu du heredoc.
@@ -277,6 +312,7 @@ résultat du `LISEZMOI.txt` rendu. Aucun secret réel ne doit y apparaître.
 
 ```bash
 python3 -m py_compile *.py
+python3 -m compileall -q web
 bash -n *.sh
 find . -type d -name '__pycache__' -prune -exec rm -rf {} +
 ```
@@ -284,4 +320,5 @@ find . -type d -name '__pycache__' -prune -exec rm -rf {} +
 Le skill est validé lorsque les trois sources normatives sont cohérentes,
 que le `LISEZMOI.txt` rendu a été relu, que les commandes copiées ont été
 exécutées sur des données synthétiques et qu'aucun secret réel n'a été
-manipulé.
+manipulé. Si le périmètre inclut l'interface web, les contrôles du point 8
+doivent aussi être passés.

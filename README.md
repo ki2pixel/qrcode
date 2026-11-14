@@ -45,7 +45,8 @@ Le script :
 - génère un QR par morceau ;
 - ajoute dans chaque QR une ligne d’identification
   `LQR1 xx n/total` (par exemple `LQR1 aa 1/100`) ;
-- produit l’index de recherche, les étiquettes et les métadonnées ;
+- produit l’index de recherche (`pdf/index_qr.pdf`, `html/index_qr.html`),
+  les étiquettes et les métadonnées ;
 - compose `pdf/planches_qr.pdf` (compact, 4×5 QR par page A4) et
   `pdf/planches_qr_grand.pdf` (confort, 3×4 QR par page, QR de 54 mm) ;
 - compose une page de test `pdf/test_grand_8qr.pdf` avec les 8 premiers QR
@@ -597,14 +598,15 @@ efface immédiatement le tmpfs sans attendre.
   démonter puis à rafraîchir.
 - **Clé auto-montée** : si le bureau monte `URGENCE_QR` à l’insertion, la clé
   reste visible en ambre avec le badge « Partition montée (accès verrouillé) ».
-  Le bouton « Démonter la partition » appelle `udisksctl unmount -b /dev/sdXN`
-  (ou `/dev/sdX` pour une clé montée sans table de partition) avec les droits
-  de l’utilisateur courant, sans `sudo` et sans option forcée
-  (`-f`/`-l`). La cible est revalidée côté serveur : seules les partitions d’un
+  Le bouton « Démonter la partition » exécute
+  `udisksctl unmount --no-user-interaction -b /dev/sdXN` (ou `/dev/sdX` pour
+  une clé montée sans table de partition) avec les droits de l’utilisateur
+  courant, sans `sudo` et sans option forcée (`-f`/`-l`). La cible est
+  revalidée côté serveur : seules les partitions d’un
   disque amovible sûr, dont le montage est le seul obstacle, sont acceptées.
-  En cas d’échec, l’interface affiche la commande exacte à copier et un bouton
-  « Rafraîchir » ; si `udisksctl` est absent, elle propose uniquement
-  `sudo umount /dev/sdXN` à exécuter manuellement. Après démontage, la clé
+  En cas d’échec, l’interface affiche la commande à copier
+  (`udisksctl unmount -b /dev/sdXN`, ou `sudo umount /dev/sdXN` si
+  `udisksctl` est absent) et un bouton « Rafraîchir ». Après démontage, la clé
   passe en vert « Prête / Sûre » et l’étape 2 s’ouvre automatiquement.
 
 ### 6.2 Sécurité et limites
@@ -613,6 +615,11 @@ efface immédiatement le tmpfs sans attendre.
   (`$XDG_RUNTIME_DIR/qrcode_web_5100` ou `/dev/shm/qrcode_web_5100_<uid>`),
   avec permissions `0700`, `umask 077`, core dumps désactivés et sous-processus
   dont `HOME`, `TMPDIR` et les caches sont redirigés vers la RAM.
+- Les téléversements sont limités à **338 000 octets** pour le CSV, **16 Mio**
+  pour l’export JSON de scans et **256 Mio** pour l’archive ZIP ; les index
+  extraits sont plafonnés à 64 Mio (fichiers CSV d’index) et 1 Mio
+  (`index_meta.json`). Les archives sont contrôlées contre le zip-slip et les
+  bombes ZIP.
 - Les secrets ne sont jamais journalisés. L’extraction masque les champs
   sensibles ; ils ne s’affichent qu’après un clic explicite. Un téléchargement
   de CSV extrait ou restauré sort volontairement de la RAM et contient des
@@ -626,8 +633,9 @@ efface immédiatement le tmpfs sans attendre.
   `consulter_coffre_ro.sh`, qui contrôlent le swap, l’imprimante et l’enclave
   RAM de bout en bout.
 - Ne jamais exposer le port 5100 au réseau, ni ajouter un proxy inverse.
-  Le serveur refuse `0.0.0.0`, vérifie les en-têtes `Host` et `Origin`, applique
-  une CSP stricte et bloque les requêtes API sans jeton.
+  Le serveur n’écoute que sur `127.0.0.1:5100`, vérifie l’en-tête `Host` et
+  l’`Origin` des requêtes mutantes, applique une CSP stricte et bloque les
+  requêtes API sans jeton.
 
 ## Sécurité
 

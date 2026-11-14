@@ -259,11 +259,12 @@ les scans Binary Eye, de rechercher une entrée, de télécharger une extraction
 ou de restaurer le CSV. Les secrets restent masqués jusqu'à un clic explicite.
 L'interface n'exécute jamais sudo et ne remplace pas le flux coffre USB pour
 les secrets critiques. Si le bureau monte automatiquement une clé, l'assistant
-USB peut démonter sa partition avec udisksctl, sans privilèges ; sinon il
-affiche la commande exacte à copier dans un terminal. Les opérations de
-sauvegarde, consultation et restauration ne demandent aucune confirmation
-matérielle. L'initialisation destructive exige le nom, le chemin complet ou
-le numéro de série du disque, avec un bouton d'insertion assistée.
+USB peut démonter sa partition avec udisksctl unmount --no-user-interaction -b
+/dev/sdXN, sans privilèges ; sinon il affiche la commande exacte à copier dans
+un terminal. Les opérations de sauvegarde, consultation et restauration ne
+demandent aucune confirmation matérielle. L'initialisation destructive exige
+le nom, le chemin complet ou le numéro de série du disque, avec un bouton
+d'insertion assistée.
 
 SÉCURITÉ
 --------
