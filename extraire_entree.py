@@ -21,32 +21,193 @@ Le résultat est écrit dans entree_R123.csv (ou --sortie).
 from __future__ import annotations
 
 import argparse
+import codecs
 import csv
 import io
-import itertools
 import json
+import os
+import re
 import sys
 from pathlib import Path
 
 
+# Correspondance entre les champs internes de l'index et les noms de colonnes
+# utilisés par les gestionnaires de mots de passe et les exports génériques.
+ALIASES_CHAMPS = {
+    "nom": ("name", "Title", "title", "nom"),
+    "dossier": ("folder", "Group", "group", "dossier"),
+    "uri": ("login_uri", "URL", "url", "uri"),
+    "identifiant": ("login_username", "Username", "username", "identifiant"),
+}
+
 # Champs de l'index utilisés pour reconnaître une entrée dans les scans.
 CHAMPS_INDEX = [
-    ("name", "nom"),
-    ("folder", "dossier"),
-    ("login_uri", "uri"),
-    ("login_username", "identifiant"),
+    ("nom", ALIASES_CHAMPS["nom"]),
+    ("dossier", ALIASES_CHAMPS["dossier"]),
+    ("uri", ALIASES_CHAMPS["uri"]),
+    ("identifiant", ALIASES_CHAMPS["identifiant"]),
 ]
+
+# Borne volontaire de la recherche multi-encodages. Elle évite l'explosion
+# combinatoire historique de type 2^n tout en gardant les chemins les plus
+# plausibles (taille attendue, UTF-8, candidat réparé).
+MAX_ETATS = 64
+
+
+def _cp1252_raw_handler(exc):
+    """Replie les points de code C1 non définis sur leur octet Latin-1."""
+    if isinstance(exc, UnicodeEncodeError):
+        return (exc.object[exc.start : exc.end].encode("latin-1"), exc.end)
+    raise exc
+
+
+codecs.register_error("cp1252_raw", _cp1252_raw_handler)
+
+
+def norm_nbsp(value: str) -> str:
+    """Normalise l'espace insécable comme le fait Binary Eye."""
+    return value.replace("\u00a0", " ")
+
+
+def indice_champ(header: list[str], champ: str) -> int | None:
+    """Retourne l'indice de la première colonne correspondant au champ."""
+    alias = ALIASES_CHAMPS.get(champ, ())
+    normalises = [(v.lstrip("\ufeff").strip(), i) for i, v in enumerate(header)]
+    for nom in alias:
+        for valeur, i in normalises:
+            if valeur == nom:
+                return i
+    alias_cf = {nom.casefold() for nom in alias}
+    for valeur, i in normalises:
+        if valeur.casefold() in alias_cf:
+            return i
+    return None
+
+
+def _reparer_nbsp_apres_utf8(brut: bytes) -> bytes:
+    """Restaure 0xA0 lorsqu'il a été normalisé en 0x20 par Binary Eye."""
+    motif = rb"([\xc2-\xdf]|[\xe0-\xef][\x80-\xbf]|[\xf0-\xf4][\x80-\xbf]{2}) "
+    return re.sub(motif, lambda m: m.group(1) + b"\xa0", brut)
+
+
+def _suffixe_frontiere_utf8(prefixe: bytes) -> bytes:
+    """Extrait un suffixe commençant sur une frontière de séquence UTF-8."""
+    suffixe = prefixe[-4:]
+    while suffixe and 0x80 <= suffixe[0] <= 0xBF:
+        suffixe = suffixe[1:]
+    return suffixe
+
+
+def est_prefixe_utf8(data: bytes) -> bool:
+    """Vrai si data est un début valide d'UTF-8 (fin incomplète acceptée)."""
+    decoder = codecs.getincrementaldecoder("utf-8")()
+    try:
+        decoder.decode(data, final=False)
+    except UnicodeDecodeError:
+        return False
+    return True
+
+
+def est_utf8_complet(data: bytes) -> bool:
+    """Vrai si data est une séquence UTF-8 complète et valide."""
+    decoder = codecs.getincrementaldecoder("utf-8")()
+    try:
+        decoder.decode(data, final=True)
+    except UnicodeDecodeError:
+        return False
+    return True
+
+
+def ordonner_candidats(candidats: list[bytes], taille_attendue: int | None) -> list[bytes]:
+    """Place d'abord les candidats dont la taille correspond au morceau."""
+    uniques: list[bytes] = []
+    for cand in candidats:
+        if cand not in uniques:
+            uniques.append(cand)
+    if not taille_attendue:
+        return uniques
+    # Tri stable : à taille égale, l'ordre UTF-8/cp1252/latin-1 de génération
+    # est conservé.
+    return sorted(uniques, key=lambda c: 0 if len(c) == taille_attendue else 1)
+
+
+def construire_candidats_complets(
+    candidats_par_morceau: list[list[bytes]],
+    tailles_attendues: list[int | None],
+    max_etats: int = MAX_ETATS,
+) -> tuple[list[bytes], bool]:
+    """Construit au plus max_etats concaténations UTF-8 plausibles.
+
+    La validité UTF-8 n'est vérifiée qu'à la frontière entre le préfixe et le
+    morceau courant. Les états sont dédupliqués et limités pour éviter la
+    croissance exponentielle.
+    """
+    etats: list[tuple[bytes, int, int, int]] = [(b"", 0, 0, 0)]
+    tronque = False
+
+    for i, candidats in enumerate(candidats_par_morceau):
+        taille = tailles_attendues[i] if i < len(tailles_attendues) else None
+        candidats = ordonner_candidats(candidats, taille)
+        if not candidats:
+            return [], tronque
+
+        suivants: dict[bytes, tuple[int, int, int]] = {}
+        for prefixe, conformes, ecart, rang in etats:
+            for rang_cand, cand in enumerate(candidats):
+                if not est_prefixe_utf8(
+                    _suffixe_frontiere_utf8(prefixe) + cand
+                ):
+                    continue
+                data = prefixe + cand
+                conforme = 1 if taille is not None and len(cand) == taille else 0
+                ecart_cand = abs(len(cand) - taille) if taille is not None else 0
+                score = (
+                    conformes + conforme,
+                    ecart + ecart_cand,
+                    rang + rang_cand,
+                )
+                ancien = suivants.get(data)
+                if ancien is None or (
+                    score[0],
+                    -score[1],
+                    -score[2],
+                ) > (
+                    ancien[0],
+                    -ancien[1],
+                    -ancien[2],
+                ):
+                    suivants[data] = score
+
+        if not suivants:
+            return [], tronque
+
+        if len(suivants) > max_etats:
+            tronque = True
+            tries = sorted(
+                suivants.items(),
+                key=lambda item: (item[1][0], -item[1][1], -item[1][2]),
+                reverse=True,
+            )
+            suivants = dict(tries[:max_etats])
+
+        etats = [
+            (data, score[0], score[1], score[2])
+            for data, score in suivants.items()
+        ]
+
+    resultats = [data for data, _, _, _ in etats if est_utf8_complet(data)]
+    return resultats, tronque
 
 
 def charger_index(path: Path) -> list[dict]:
-    with path.open(newline="", encoding="utf-8") as f:
+    with path.open(newline="", encoding="utf-8-sig") as f:
         return list(csv.DictReader(f))
 
 
 def charger_meta(path: Path) -> dict:
     if not path or not path.exists():
         return {}
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 def suffixe_vers_numero(sfx: str) -> int:
@@ -103,20 +264,38 @@ def candidats_depuis_texte(texte: str, retirer_separateur: bool = True) -> list[
     Les exports texte ajoutent un séparateur en fin d'enregistrement ; les
     exports JSON ne le font pas. `retirer_separateur` permet de distinguer les
     deux cas.
+
+    L'ordre privilégie UTF-8, puis CP1252 tolérant et Latin-1. Un candidat
+    complémentaire répare l'octet 0xA0 normalisé en 0x20 par Binary Eye.
     """
     candidats: list[bytes] = []
-    for encodage in ("latin-1", "cp1252", "utf-8"):
+
+    def ajouter(brut: bytes) -> None:
+        if brut not in candidats:
+            candidats.append(brut)
+        repare = _reparer_nbsp_apres_utf8(brut)
+        if repare != brut and repare not in candidats:
+            candidats.append(repare)
+
+    for encodage, erreurs in (
+        ("utf-8", "strict"),
+        ("cp1252", "cp1252_raw"),
+        ("latin-1", "strict"),
+    ):
         try:
-            brut = texte.encode(encodage)
+            brut = texte.encode(encodage, errors=erreurs)
         except UnicodeEncodeError:
             continue
         if retirer_separateur:
-            if brut.endswith(b" \n"):
+            if brut.endswith(b" \r\n"):
+                brut = brut[:-3]
+            elif brut.endswith(b" \n"):
+                brut = brut[:-2]
+            elif brut.endswith(b"\r\n"):
                 brut = brut[:-2]
             elif brut.endswith(b"\n"):
                 brut = brut[:-1]
-        if brut not in candidats:
-            candidats.append(brut)
+        ajouter(brut)
     return candidats
 
 
@@ -134,12 +313,36 @@ def candidats_export_texte(path: Path) -> list[bytes]:
     return candidats_depuis_texte(texte, retirer_separateur=True)
 
 
-def charger_export_json(path: Path) -> dict[str, list[bytes]]:
+def analyser_entete_lqr(ligne: str) -> tuple[str, int, int] | None:
+    """Analyse strictement une ligne `LQR1 xx n/total`."""
+    elements = ligne.split()
+    if len(elements) < 3 or elements[0] != "LQR1":
+        return None
+    suffixe = elements[1]
+    if len(suffixe) != 2 or not suffixe.isalpha():
+        return None
+    if not all("a" <= c <= "z" for c in suffixe):
+        return None
+    num, sep, total_txt = elements[2].partition("/")
+    if not sep or not num.isdigit() or not total_txt.isdigit():
+        return None
+    n, total = int(num), int(total_txt)
+    if total < 1 or n < 1 or n > total:
+        return None
+    if numero_vers_suffixe(n) != suffixe:
+        return None
+    return f"morceau_{suffixe}", n, total
+
+
+def charger_export_json(
+    path: Path, total_attendu: int | None = None
+) -> dict[str, list[bytes]]:
     """Charge un export JSON natif de Binary Eye.
 
     Le fichier contient une liste d'objets avec un champ `content` qui commence
     par la ligne `LQR1 xx n/total`. On renvoie un dictionnaire
     `morceau_xx -> candidats d'octets`, comme pour les scans individuels.
+    Les entrées malformées ou issues d'une autre sauvegarde sont écartées.
     """
     if path.suffix.lower() != ".json":
         raise SystemExit(
@@ -149,29 +352,44 @@ def charger_export_json(path: Path) -> dict[str, list[bytes]]:
             "une restauration fidèle."
         )
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
     except json.JSONDecodeError as exc:
         raise SystemExit(f"Export JSON invalide : {path} ({exc})") from exc
     if not isinstance(data, list):
         raise SystemExit(f"Format d'export JSON inattendu : {path}")
 
     mapping: dict[str, list[bytes]] = {}
+    ignores = 0
     for item in data:
         if not isinstance(item, dict):
             continue
         content = item.get("content")
-        if not isinstance(content, str) or not content.startswith("LQR1 "):
+        if not isinstance(content, str):
+            continue
+        content = content.lstrip("\ufeff")
+        if not content.startswith("LQR1 "):
             continue
         header, sep, reste = content.partition("\n")
         if not sep:
             # Export CSV : les sauts de ligne ont été remplacés par des espaces.
+            ignores += 1
             continue
-        morceau = header.split()[1]
-        if not morceau.startswith("morceau_"):
-            morceau = f"morceau_{morceau}"
-        if len(morceau) != len("morceau_") + 2:
+        entete = analyser_entete_lqr(header)
+        if entete is None:
+            ignores += 1
+            continue
+        morceau, _n, total = entete
+        if total_attendu is not None and total != total_attendu:
+            ignores += 1
             continue
         mapping[morceau] = candidats_depuis_texte(reste, retirer_separateur=False)
+
+    if ignores:
+        print(
+            f"Attention : {ignores} entrée(s) LQR1 ignorée(s) "
+            "(format invalide ou autre sauvegarde).",
+            file=sys.stderr,
+        )
     return mapping
 
 
@@ -203,14 +421,12 @@ def retirer_entete_lqr(data: bytes) -> tuple[str | None, bytes]:
     fin = data.find(b"\n")
     if fin == -1:
         return None, data
-    entete = data[:fin].decode("ascii", errors="replace").split()
-    if len(entete) >= 2:
-        nom = entete[1]
-        if not nom.startswith("morceau_"):
-            nom = f"morceau_{nom}"
-        if len(nom) == len("morceau_") + 2:
-            return nom, data[fin + 1 :]
-    return None, data
+    ligne = data[:fin].decode("ascii", errors="replace").rstrip("\r")
+    entete = analyser_entete_lqr(ligne)
+    if entete is None:
+        return None, data
+    nom, _n, _total = entete
+    return nom, data[fin + 1 :]
 
 
 def lire_morceau(path: Path) -> tuple[list[bytes], str, str | None]:
@@ -266,15 +482,16 @@ def choisir_cible(index: list[dict], args) -> dict:
 
     rows = base
     if args.nom:
+        recherche = norm_nbsp(args.nom).casefold()
         rows = [
-            r for r in base if r["nom"].casefold() == args.nom.casefold()
+            r for r in base if norm_nbsp(r["nom"]).casefold() == recherche
         ]
         # Si le nom exact n'a rien donné, on tente une recherche partielle.
         if not rows:
             rows = [
                 r
                 for r in base
-                if args.nom.casefold() in r["nom"].casefold()
+                if recherche in norm_nbsp(r["nom"]).casefold()
             ]
 
     if not rows:
@@ -304,8 +521,8 @@ def choisir_cible(index: list[dict], args) -> dict:
 def charger_tailles_morceaux(path: Path) -> dict[str, int]:
     if not path.exists():
         return {}
-    with path.open(newline="", encoding="utf-8") as f:
-        return {r["morceau"]: int(r["taille_octets"]) for r in csv.DictReader(f)}
+    with path.open(newline="", encoding="utf-8-sig") as f:
+        return {r["morceau"].lstrip("\ufeff"): int(r["taille_octets"]) for r in csv.DictReader(f)}
 
 
 def extraire_par_offsets(
@@ -326,10 +543,11 @@ def extraire_par_offsets(
         return None
 
     # Vérifie que la ligne correspond bien aux métadonnées de l'index.
-    idx = {name: i for i, name in enumerate(header)}
-    for champ, cle in CHAMPS_INDEX:
-        if champ in idx and rows[0][idx[champ]] != cible.get(cle, ""):
-            return None
+    for cle, _alias in CHAMPS_INDEX:
+        idx = indice_champ(header, cle)
+        if idx is not None and idx < len(rows[0]):
+            if norm_nbsp(rows[0][idx]) != norm_nbsp(cible.get(cle, "")):
+                return None
     return rows[0]
 
 
@@ -343,11 +561,13 @@ def extraire_par_recherche(
         # suivant (UTF-8 ou Latin-1/CP1252).
         return None
 
-    idx = {name: i for i, name in enumerate(header)}
-    attendu = {}
-    for champ, cle in CHAMPS_INDEX:
-        if champ in idx:
-            attendu[champ] = (idx[champ], cible.get(cle, ""))
+    attendu = []
+    for cle, _alias in CHAMPS_INDEX:
+        idx = indice_champ(header, cle)
+        if idx is not None:
+            attendu.append((idx, norm_nbsp(cible.get(cle, ""))))
+    if not attendu:
+        return None
 
     candidats: set[tuple[str, ...]] = set()
 
@@ -360,7 +580,9 @@ def extraire_par_recherche(
             for row in reader:
                 if len(row) != len(header):
                     continue
-                if all(row[pos] == valeur for pos, valeur in attendu.values()):
+                if all(
+                    norm_nbsp(row[pos]) == valeur for pos, valeur in attendu
+                ):
                     candidats.add(tuple(row))
         except csv.Error:
             continue
@@ -375,21 +597,29 @@ def ecrire_sortie(
     cible: dict,
     meta: dict,
 ) -> int:
+    terminator = "\n" if meta.get("line_ending") == "lf" else "\r\n"
+    quoting = csv.QUOTE_ALL if meta.get("quote_all") else csv.QUOTE_MINIMAL
     with out_path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f, lineterminator="\r\n")
+        writer = csv.writer(f, lineterminator=terminator, quoting=quoting)
         writer.writerow(header)
         writer.writerow(row)
     out_path.chmod(0o600)
 
     # Longueur de la ligne seule, hors en-tête.
     buf = io.StringIO(newline="")
-    csv.writer(buf, lineterminator="\r\n").writerow(row)
+    csv.writer(buf, lineterminator=terminator, quoting=quoting).writerow(row)
     ligne = buf.getvalue().encode("utf-8")
 
-    # Le dernier enregistrement du CSV n'a pas de CRLF final.
+    # Un enregistrement final ne possède un terminateur que si le fichier
+    # source en avait un. Les anciens index ne stockent pas final_newline :
+    # on conserve alors l'ancien comportement (pas de saut final).
     total = int(meta.get("size", 0))
-    if total and int(cible["fin_octet_exclue"]) == total and ligne.endswith(b"\r\n"):
-        ligne = ligne[:-2]
+    if total and int(cible["fin_octet_exclue"]) == total:
+        final_newline = meta.get("final_newline")
+        if final_newline is not True:
+            suffixe = terminator.encode("utf-8")
+            if ligne.endswith(suffixe):
+                ligne = ligne[: -len(suffixe)]
     return len(ligne)
 
 
@@ -421,6 +651,7 @@ def premier_existant(racine: Path, *chemins: str) -> Path:
 
 
 def main() -> int:
+    os.umask(0o077)
     parser = argparse.ArgumentParser(
         description="Extrait une entrée d'une sauvegarde QR à partir des scans."
     )
@@ -510,10 +741,17 @@ def main() -> int:
     index = charger_index(index_path)
     meta = charger_meta(Path(args.meta))
     header = meta.get("header")
-    if not header:
+    if not isinstance(header, list) or not header:
         raise SystemExit(
             f"En-tête CSV introuvable dans {args.meta}. "
             "Garde index_meta.json avec l'index, ou fournis un index complet."
+        )
+    header[0] = header[0].lstrip("\ufeff")
+    if not any(indice_champ(header, cle) is not None for cle, _ in CHAMPS_INDEX):
+        raise SystemExit(
+            "Aucune colonne d'identification reconnue dans l'en-tête CSV. "
+            "Formats pris en charge : Bitwarden, KeePassXC ou colonnes "
+            "génériques (nom, dossier, url, identifiant)."
         )
 
     cible = choisir_cible(index, args)
@@ -529,12 +767,16 @@ def main() -> int:
             export_path = Path(args.export)
             if not export_path.is_file():
                 raise SystemExit(f"Export introuvable : {export_path}")
-            mapping_export = charger_export_json(export_path)
+            mapping_export = charger_export_json(
+                export_path, int(meta.get("total_chunks", 0)) or None
+            )
         else:
             auto = scan_dir / "binary_eye_all_qr.json"
             if auto.is_file():
                 export_path = auto
-                mapping_export = charger_export_json(auto)
+                mapping_export = charger_export_json(
+                    auto, int(meta.get("total_chunks", 0)) or None
+                )
 
     tailles = charger_tailles_morceaux(Path(args.morceaux))
     mapping = indexer_scans(scan_dir) if mapping_export is None else {}
@@ -562,7 +804,8 @@ def main() -> int:
                 )
         if any(semble_traduit(c) for c in candidats):
             traduits.append(source)
-        candidats_par_morceau.append(candidats)
+        taille = tailles.get(morceau, int(meta.get("chunk_size", 500)))
+        candidats_par_morceau.append(ordonner_candidats(candidats, taille))
         modes.append(mode)
         if mapping_export is None:
             fichiers.append(source)
@@ -584,10 +827,22 @@ def main() -> int:
         tailles.get(m, int(meta.get("chunk_size", 500))) for m in morceaux
     )
 
+    tailles_attendues = [
+        tailles.get(m, int(meta.get("chunk_size", 500))) for m in morceaux
+    ]
+    candidats_complets, tronque = construire_candidats_complets(
+        candidats_par_morceau, tailles_attendues
+    )
+    if tronque:
+        print(
+            "Attention : la recherche d'encodages a été limitée "
+            f"à {MAX_ETATS} états.",
+            file=sys.stderr,
+        )
+
     lignes: list[list[str]] | None = None
     methode = "recherche par nom"
-    for combinaison in itertools.product(*candidats_par_morceau):
-        data = b"".join(combinaison)
+    for data in candidats_complets:
         if len(data) == total_attendu and "texte" not in modes:
             ligne = extraire_par_offsets(data, cible, meta, header)
             if ligne is not None:
@@ -601,10 +856,17 @@ def main() -> int:
             break
 
     if lignes is None:
+        complement = (
+            " La recherche bornée a peut-être écarté une combinaison rare ; "
+            "essaie un export en octets bruts."
+            if tronque
+            else ""
+        )
         raise SystemExit(
             "Entrée introuvable dans les scans. "
             "Vérifie que les morceaux indiqués sont bien présents et complets. "
             "Si le scan contient des accents, essaie un export en octets bruts."
+            + complement
         )
 
     if len(lignes) > 1:

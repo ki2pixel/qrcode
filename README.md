@@ -21,9 +21,16 @@ consultation en lecture seule.
 ./creer_sauvegarde_qr.sh export.csv [dossier_sortie]
 ```
 
+Formats source pris en charge : exports **Bitwarden** (`name`, `folder`,
+`login_uri`, `login_username`) et **KeePassXC** (`Title`, `Group`, `URL`,
+`Username`), ainsi que les colonnes génériques équivalentes.
+
+Le CSV doit être en UTF-8 valide et ne pas dépasser **338 000 octets**
+(676 morceaux de 500 octets). Au-delà, le script s’arrête avant le découpage.
+
 Le script :
 
-- découpe le CSV en morceaux de 500 octets ;
+- découpe le CSV en morceaux de 500 octets avec des suffixes `aa` à `zz` ;
 - génère un QR par morceau ;
 - ajoute dans chaque QR une ligne d’identification
   `LQR1 xx n/total` (par exemple `LQR1 aa 1/100`) ;
@@ -78,7 +85,7 @@ sauvegarde_qr_<export>_<date>/
 | `pdf/test_grand_8qr.pdf` | page de test : les 8 premiers QR en grand |
 | `pdf/index_qr.pdf` | index de recherche (page de garde + index par morceau + par nom) |
 | `csv/index_enregistrements.csv` | index complet, sans mots de passe |
-| `json/index_meta.json` | en-tête CSV, taille, SHA-256 exact et sans NBSP, format QR |
+| `json/index_meta.json` | en-tête CSV, taille, SHA-256 exact et sans NBSP, fin de ligne, style de guillemets, format QR |
 | `scripts/extraire_entree.py` | script de récupération d’une entrée |
 | `scripts/restaurer_sauvegarde.py` | restauration complète + vérification SHA-256 |
 | `morceaux/` | morceaux texte du CSV |
@@ -117,6 +124,10 @@ python3 scripts/extraire_entree.py --nom example.com --scans ./scans
 
 Le script détecte automatiquement `csv/`, `json/` et `scans/`, que tu le lances
 depuis la racine ou depuis `scripts/`.
+
+Il reconnaît les colonnes Bitwarden et KeePassXC (`name`/`Title`,
+`folder`/`Group`, `login_uri`/`URL`, `login_username`/`Username`). Une
+recherche `--nom` normalise les espaces insécables.
 
 Le script utilise l’export JSON global `scans/binary_eye_all_qr.json`. Il
 reconnaît les morceaux par leur en-tête `LQR1` et gère les encodages
@@ -162,6 +173,8 @@ Le script :
 - utilise `scans/binary_eye_all_qr.json` s’il est présent ;
 - reconnaît les morceaux par leur en-tête `LQR1` ;
 - essaie les encodages UTF-8 et Latin-1/CP1252 de Binary Eye ;
+- calcule d’abord le SHA-256 sur les octets bruts concaténés, avant toute
+  réécriture CSV, afin de préserver les exports `QUOTE_ALL` de KeePassXC ;
 - reconstitue le CSV complet ;
 - essaie les fins de ligne CRLF et LF ;
 - compare le SHA-256 exact et le SHA-256 sans NBSP à ceux de
@@ -235,6 +248,15 @@ pas le système en cours, et affiche son modèle, sa taille et son numéro de
 série. Il faut taper `EFFACER` puis le numéro de série exact : **toutes les
 données de la clé sont détruites**.
 
+Pour les tests sur image loopback uniquement, ajoute
+`--allow-loopback`. Le drapeau n’autorise que les périphériques de type
+`loop` ; il ne doit jamais être utilisé pour contourner la validation d’un
+disque physique.
+
+Il désactive temporairement le swap système et les core dumps pendant les
+allocations Argon2id et l’extraction de l’en-tête, puis restaure le swap à la
+sortie. L’en-tête LUKS2 est extrait dans un tmpfs dédié (`noswap` sur les
+noyaux ≥ 6.4), jamais dans `/dev/shm` partagé avec les autres utilisateurs.
 Il crée ensuite :
 
 - une partition GPT `COFFRE_LUKS` en LUKS2 (AES-XTS 512 bits, Argon2id,
@@ -285,6 +307,7 @@ Options :
 sudo ./executer_sauvegarde_ram.sh --no-print /dev/sdX export.csv
 sudo ./executer_sauvegarde_ram.sh --garder-source /dev/sdX export.csv
 sudo ./executer_sauvegarde_ram.sh --ram-size 1G /dev/sdX
+sudo ./executer_sauvegarde_ram.sh --allow-loopback --no-print /dev/loopX export.csv
 ```
 
 Si le CSV vient du disque, le script demande confirmation avant de tenter de
@@ -292,13 +315,13 @@ le détruire ; `shred` n’est pas une garantie sur SSD/NVMe à cause du wear
 leveling. L’export direct dans l’enclave reste la seule méthode réellement
 sûre.
 
-L’impression est proposée interactivement. Le script isole `/var/spool/cups`
-dans un tmpfs (`root:lp`, `0710`, sous-dossiers `tmp` `1770` et `cache`
-`0770`), imprime d’abord `pdf/test_grand_8qr.pdf` à 100 %, puis les planches
-choisies. Après impression, le spoule est purgé, démonté et CUPS redémarré
-seulement s’il l’était avant. Les travaux déjà présents dans la file CUPS sont
-masqués par le tmpfs et réapparaissent après démontage : le script ne les
-annule pas.
+L’impression est proposée interactivement. Le script isole `/var/spool/cups`,
+`/var/cache/cups` et `/var/log/cups` dans des tmpfs (`root:lp`, sans exécution
+ni swap), imprime d’abord `pdf/test_grand_8qr.pdf` à 100 %, puis les planches
+choisies. Après impression, le spoule est écrasé par `shred`, démonté, puis
+CUPS est redémarré seulement s’il l’était avant. Les travaux déjà présents
+dans la file CUPS sont masqués par le tmpfs et réapparaissent après
+démontage : le script ne les annule pas.
 
 Le script crée ensuite en RAM :
 
@@ -315,8 +338,10 @@ capsule, les `.par2`, le manifeste et l’en-tête chiffré sont copiés sur
 La partition d’urgence ne fait que 256 Mio : pour un très gros portefeuille,
 la capsule et ses 15 % de redondance peuvent ne pas tenir. Le script prévient
 et permet d’ignorer la copie d’urgence ; le coffre LUKS2 reste complet.
-La partition d’urgence conserve aussi les capsules des sauvegardes
-précédentes : pense à supprimer les anciennes avant qu’elle ne sature.
+Après vérification de la nouvelle copie, le script propose de supprimer par
+`shred` les anciennes capsules, leurs `.par2` et leurs manifestes. Sur une
+clé flash, `shred` ne garantit pas l’effacement physique des cellules ; il
+faut toujours vérifier l’espace disponible et la phrase de passe age.
 
 ### 5.4 Consulter ou restaurer en lecture seule
 
@@ -324,10 +349,12 @@ précédentes : pense à supprimer les anciennes avant qu’elle ne sature.
 sudo ./consulter_coffre_ro.sh /dev/sdX --id R123
 sudo ./consulter_coffre_ro.sh /dev/sdX --nom example.com
 sudo ./consulter_coffre_ro.sh /dev/sdX --restaurer
+sudo ./consulter_coffre_ro.sh --allow-loopback /dev/loopX --restaurer
 ```
 
-Sans action, un menu interactif est proposé. Le script monte une enclave RAM,
-ouvre LUKS2 avec `cryptsetup open --readonly`, puis monte ext4 avec
+Sans action, un menu interactif est proposé. Le script désactive
+temporairement le swap et les core dumps, monte une enclave RAM, ouvre LUKS2
+avec `cryptsetup open --readonly`, puis monte ext4 avec
 `-o ro,noatime,nodev,nosuid,noload`. Aucune écriture n’est faite sur la clé.
 
 Dépose l’export JSON global de Binary Eye dans :
@@ -339,7 +366,9 @@ Dépose l’export JSON global de Binary Eye dans :
 ou utilise `--export /chemin/binary_eye_all_qr.json`. Les sorties sont écrites
 exclusivement dans `/mnt/ram_sec/sorties/`. Le script affiche leur nom et
 attend que tu appuies sur Entrée : **copie le fichier dont tu as besoin avant
-de continuer**, il sera effacé avec l’enclave.
+de continuer**, il sera effacé avec l’enclave. Si la restauration affiche
+`DIFFÉRENT`, le fichier est conservé en RAM et la pause est maintenue pour
+permettre son inspection, au lieu d’être détruit immédiatement.
 
 `--afficher` affiche la ligne extraite, mot de passe compris, dans le
 terminal. À utiliser avec prudence : le contenu peut rester dans le scrollback

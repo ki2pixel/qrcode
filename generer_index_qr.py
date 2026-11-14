@@ -28,6 +28,7 @@ import csv
 import hashlib
 import html
 import json
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -36,6 +37,38 @@ try:
     from weasyprint import HTML
 except ImportError:  # pragma: no cover
     HTML = None
+
+
+ALIASES_CHAMPS = {
+    "nom": ("name", "Title", "title", "nom"),
+    "dossier": ("folder", "Group", "group", "dossier"),
+    "uri": ("login_uri", "URL", "url", "uri"),
+    "identifiant": ("login_username", "Username", "username", "identifiant"),
+}
+
+
+def decouper_lignes_csv(texte: str) -> list[str]:
+    """Découpe uniquement sur CRLF, LF ou CR, jamais sur U+2028/U+0085."""
+    lignes: list[str] = []
+    debut = 0
+    i = 0
+    while i < len(texte):
+        if texte[i] == "\r":
+            if i + 1 < len(texte) and texte[i + 1] == "\n":
+                i += 2
+            else:
+                i += 1
+            lignes.append(texte[debut:i])
+            debut = i
+        elif texte[i] == "\n":
+            i += 1
+            lignes.append(texte[debut:i])
+            debut = i
+        else:
+            i += 1
+    if debut < len(texte):
+        lignes.append(texte[debut:])
+    return lignes
 
 
 def suffixe_morceau(n: int) -> str:
@@ -57,7 +90,7 @@ def charger_enregistrements(csv_path: Path):
     except UnicodeDecodeError as exc:
         raise SystemExit(f"Le fichier n'est pas de l'UTF-8 valide : {exc}") from exc
 
-    lines = text.splitlines(keepends=True)
+    lines = decouper_lignes_csv(text)
     if "".join(lines).encode("utf-8") != raw:
         raise SystemExit(
             "Le découpage en lignes ne préserve pas les octets du fichier. "
@@ -71,7 +104,12 @@ def charger_enregistrements(csv_path: Path):
         pos += len(line.encode("utf-8"))
     offsets.append(len(raw))
 
-    reader = csv.reader(lines)
+    # Le BOM reste dans les offsets d'octets mais doit être retiré avant le
+    # parseur CSV, sinon la première colonne n'est pas reconnue.
+    lignes_csv = list(lines)
+    if text.startswith("\ufeff") and lignes_csv:
+        lignes_csv[0] = lignes_csv[0][1:]
+    reader = csv.reader(lignes_csv)
     rows: list[tuple[int, int, list[str]]] = []
     prev = 0
     for row in reader:
@@ -85,18 +123,43 @@ def charger_enregistrements(csv_path: Path):
         raise SystemExit("Le fichier CSV est vide.")
 
     header = rows[0][2]
+    header[0] = header[0].lstrip("\ufeff")
     records = []
     for i, (start, end, row) in enumerate(rows[1:], 1):
         records.append({"id": f"R{i:03d}", "start": start, "end": end, "row": row})
     return raw, header, records
 
 
+def indice_champ(header: list[str], champ: str) -> int | None:
+    """Trouve une colonne par alias, sans tenir compte de la casse."""
+    alias = ALIASES_CHAMPS.get(champ, ())
+    normalises = [(v.lstrip("\ufeff").strip(), i) for i, v in enumerate(header)]
+    for nom in alias:
+        for valeur, i in normalises:
+            if valeur == nom:
+                return i
+    alias_cf = {nom.casefold() for nom in alias}
+    for valeur, i in normalises:
+        if valeur.casefold() in alias_cf:
+            return i
+    return None
+
+
 def champ(row: list[str], header: list[str], name: str) -> str:
-    try:
-        idx = header.index(name)
-    except ValueError:
+    idx = indice_champ(header, name)
+    if idx is None:
         return ""
     return row[idx] if idx < len(row) else ""
+
+
+def detecter_fin_de_ligne(texte: str) -> str:
+    """Retourne crlf ou lf selon le premier terminateur rencontré."""
+    for i, char in enumerate(texte):
+        if char == "\n":
+            return "crlf" if i > 0 and texte[i - 1] == "\r" else "lf"
+        if char == "\r":
+            return "crlf" if i + 1 < len(texte) and texte[i + 1] == "\n" else "lf"
+    return "lf"
 
 
 def tronquer(value: str, max_len: int = 60) -> str:
@@ -119,13 +182,20 @@ def dossier_court(value: str) -> str:
 
 def construire_index(raw: bytes, header: list[str], records: list[dict], chunk_size: int):
     total_chunks = (len(raw) + chunk_size - 1) // chunk_size
+    if total_chunks < 1:
+        raise SystemExit("Le fichier CSV est vide.")
+    if total_chunks > 26 * 26:
+        raise SystemExit(
+            f"CSV trop volumineux : {total_chunks} morceaux pour un maximum "
+            "de 676 (suffixes aa à zz)."
+        )
 
     for rec in records:
         start, end = rec["start"], rec["end"]
-        rec["name"] = champ(rec["row"], header, "name")
-        rec["folder"] = champ(rec["row"], header, "folder")
-        rec["uri"] = champ(rec["row"], header, "login_uri")
-        rec["username"] = champ(rec["row"], header, "login_username")
+        rec["name"] = champ(rec["row"], header, "nom")
+        rec["folder"] = champ(rec["row"], header, "dossier")
+        rec["uri"] = champ(rec["row"], header, "uri")
+        rec["username"] = champ(rec["row"], header, "identifiant")
         rec["first"] = start // chunk_size + 1
         rec["last"] = (end - 1) // chunk_size + 1
         rec["first_nom"] = nom_morceau(rec["first"])
@@ -496,6 +566,7 @@ extrait = data[debut - base : fin - base]
 
 
 def main() -> int:
+    os.umask(0o077)
     parser = argparse.ArgumentParser(
         description="Génère un index de récupération pour un CSV découpé en morceaux QR."
     )
@@ -548,6 +619,13 @@ def main() -> int:
         csv_dir = json_dir = pdf_dir = html_dir = out_dir
 
     raw, header, records = charger_enregistrements(csv_path)
+    if not any(
+        indice_champ(header, champ) is not None for champ in ALIASES_CHAMPS
+    ):
+        raise SystemExit(
+            "Aucune colonne d'identification reconnue. Formats pris en charge : "
+            "Bitwarden, KeePassXC ou colonnes génériques."
+        )
     total_chunks, chunks = construire_index(raw, header, records, args.chunk_size)
 
     # 1) Index machine-readable par enregistrement.
@@ -662,6 +740,15 @@ def main() -> int:
         "total_chunks": total_chunks,
         "record_count": len(records),
         "header": header,
+        "line_ending": detecter_fin_de_ligne(
+            raw.decode("utf-8", errors="replace")
+        ),
+        "final_newline": raw.endswith((b"\r\n", b"\n", b"\r")),
+        # Permet de restituer une ligne au format QUOTE_ALL (KeePassXC) lors
+        # d'une extraction ciblée, sans réécrire le CSV complet.
+        "quote_all": (
+            raw[3:] if raw.startswith(b"\xef\xbb\xbf") else raw
+        ).startswith(b'"'),
         "qr_header": "LQR1" if args.qr_header else None,
         "layout": "organise" if args.organise else "plat",
         "generated_at": datetime.now().isoformat(timespec="seconds"),

@@ -56,6 +56,7 @@ Options :
   --ram-size TAILLE    Taille maximale du tmpfs (défaut : 2G)
   --no-print           Ne pas proposer l'impression
   --garder-source      Ne pas détruire le CSV source externe
+  --allow-loopback     Autorise un périphérique /dev/loopX (tests uniquement)
   -h, --help           Affiche cette aide
 
 Sans chemin CSV, le script attend que le fichier soit exporté dans :
@@ -71,21 +72,28 @@ URGENCE_MNT="/mnt/usb_urgence"
 RAM_MNT="/mnt/ram_sec"
 MAPPER="qr_vault"
 CUPS_SPOOL="/var/spool/cups"
+CUPS_CACHE="/var/cache/cups"
+CUPS_LOG="/var/log/cups"
 
 DEV_ARG=""
 CSV_ARG=""
 RAM_SIZE="2G"
 NO_PRINT=0
 KEEP_SOURCE=0
+ALLOW_LOOPBACK=0
 
 RAM_MOUNTED=0
 VAULT_MOUNTED=0
 URGENCE_MOUNTED=0
 MAPPER_OPEN=0
-CUPS_MOUNTED=0
-CUPS_STOPPED=0
+CUPS_SPOOL_MOUNTED=0
+CUPS_CACHE_MOUNTED=0
+CUPS_LOG_MOUNTED=0
+CUPS_SERVICES_STOPPED=0
 CUPS_WAS_ACTIVE=0
 CUPS_SOCKET_WAS_ACTIVE=0
+CUPS_PATH_WAS_ACTIVE=0
+CUPS_BROWSED_WAS_ACTIVE=0
 SWAP_DISABLED=0
 SWAP_LIST=()
 
@@ -128,15 +136,24 @@ cleanup() {
 
   sync 2>/dev/null || true
   if (( URGENCE_MOUNTED )); then
-    umount "$URGENCE_MNT" 2>/dev/null || umount -l "$URGENCE_MNT" 2>/dev/null || true
+    if ! umount "$URGENCE_MNT" 2>/dev/null; then
+      warn "$URGENCE_MNT est occupé ; tentative de démontage différé."
+      umount -l "$URGENCE_MNT" 2>/dev/null || warn "Impossible de démonter $URGENCE_MNT."
+    fi
     URGENCE_MOUNTED=0
   fi
   if (( VAULT_MOUNTED )); then
-    umount "$VAULT_MNT" 2>/dev/null || umount -l "$VAULT_MNT" 2>/dev/null || true
+    if ! umount "$VAULT_MNT" 2>/dev/null; then
+      warn "$VAULT_MNT est occupé ; tentative de démontage différé."
+      umount -l "$VAULT_MNT" 2>/dev/null || warn "Impossible de démonter $VAULT_MNT."
+    fi
     VAULT_MOUNTED=0
   fi
   if (( MAPPER_OPEN )); then
-    cryptsetup close "$MAPPER" 2>/dev/null || true
+    if ! cryptsetup close "$MAPPER" 2>/dev/null; then
+      err "ATTENTION : le conteneur LUKS $MAPPER n'a pas pu être fermé (encore occupé) !"
+      rc=1
+    fi
     MAPPER_OPEN=0
   fi
 
@@ -212,7 +229,7 @@ part_path() {
 is_system_disk() {
   local dev="$1" mp src top
   for mp in / /boot /boot/efi /home /var /usr /var/lib; do
-    src="$(findmnt -n -o SOURCE --target "$mp" 2>/dev/null || true)"
+    src="$(findmnt -n -v -o SOURCE --target "$mp" 2>/dev/null || true)"
     [[ -n "$src" ]] || continue
     top="$(lsblk -sno NAME "$src" 2>/dev/null | tail -n1 | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' || true)"
     [[ "$top" == "$(basename "$dev")" ]] && return 0
@@ -228,16 +245,19 @@ is_system_disk() {
 }
 
 validate_usb_device() {
-  local dev="$1" type rm tran ro size_bytes name
+  local dev="$1" type rm tran ro size_bytes bloc
 
   [[ -b "$dev" ]] || die "Périphérique bloc introuvable : $dev"
   type="$(lsblk_field TYPE "$dev")"
-  [[ "$type" == "disk" ]] || die "Passez le disque entier (ex. /dev/sdX), pas une partition."
-
-  rm="$(lsblk_field RM "$dev")"
-  tran="$(lsblk_field TRAN "$dev")"
-  if [[ "$rm" != "1" && "$tran" != "usb" ]]; then
-    die "Le périphérique n'est pas identifié comme amovible/USB (RM=$rm, TRAN=$tran)."
+  if (( ALLOW_LOOPBACK )) && [[ "$type" == "loop" ]]; then
+    info "Mode test loopback activé sur $dev."
+  else
+    [[ "$type" == "disk" ]] || die "Passez le disque entier (ex. /dev/sdX), pas une partition."
+    rm="$(lsblk_field RM "$dev")"
+    tran="$(lsblk_field TRAN "$dev")"
+    if [[ "$rm" != "1" && "$tran" != "usb" ]]; then
+      die "Le périphérique n'est pas identifié comme amovible/USB (RM=$rm, TRAN=$tran)."
+    fi
   fi
 
   ro="$(lsblk_field RO "$dev")"
@@ -249,14 +269,17 @@ validate_usb_device() {
     die "Refus : une partition de $dev est montée. Démontez-la d'abord."
   fi
 
-  if lsblk -nr -o TYPE "$dev" 2>/dev/null | grep -Eq '^(lvm|md|dm|crypt)$'; then
-    die "Refus : le périphérique participe à un volume LVM/MD/dm. Vérifiez avec lsblk."
+  if lsblk -nr -o TYPE "$dev" 2>/dev/null | grep -Eq '^(lvm|md|raid[0-9]*|linear|dm|crypt|multipath)$'; then
+    die "Refus : le périphérique participe à un volume LVM/RAID/dm. Vérifiez avec lsblk."
   fi
 
-  name="$(basename "$dev")"
-  if [[ -d "/sys/class/block/$name/holders" ]] && [[ -n "$(ls -A "/sys/class/block/$name/holders" 2>/dev/null || true)" ]]; then
-    die "Refus : le périphérique a des dépendances noyau (holders)."
-  fi
+  while IFS= read -r bloc; do
+    bloc="$(printf '%s' "$bloc" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+    [[ -n "$bloc" && -d "/sys/class/block/$bloc/holders" ]] || continue
+    if [[ -n "$(ls -A "/sys/class/block/$bloc/holders" 2>/dev/null || true)" ]]; then
+      die "Refus : le périphérique ou l'une de ses partitions a des dépendances noyau (holders)."
+    fi
+  done < <(lsblk -nrno NAME "$dev" 2>/dev/null || true)
 
   size_bytes="$(lsblk -bdn -o SIZE "$dev" 2>/dev/null | xargs || true)"
   [[ "$size_bytes" =~ ^[0-9]+$ ]] || die "Impossible de lire la taille de $dev."
@@ -299,24 +322,57 @@ run_as_user() {
     "$@"
 }
 
-stop_cups_spool() {
-  if (( CUPS_MOUNTED )); then
-    cancel -a -x >/dev/null 2>&1 || true
-    systemctl stop cups.socket cups.service >/dev/null 2>&1 || true
-    CUPS_STOPPED=1
-    if mountpoint -q "$CUPS_SPOOL"; then
-      umount "$CUPS_SPOOL" 2>/dev/null || umount -l "$CUPS_SPOOL" 2>/dev/null || warn "Impossible de démonter $CUPS_SPOOL."
-    fi
-    CUPS_MOUNTED=0
+cups_tmpfs_options() {
+  local taille="$1" mode="$2"
+  local opts="size=$taille,mode=$mode,uid=0,gid=$(id -g lp),nodev,nosuid,noexec"
+  if kernel_ge_6_4; then
+    opts+=",noswap"
   fi
-  if (( CUPS_STOPPED )); then
+  printf '%s\n' "$opts"
+}
+
+stop_cups_spool() {
+  if (( CUPS_SPOOL_MOUNTED )); then
+    cancel -a -x >/dev/null 2>&1 || true
+    systemctl stop cups.path cups.socket cups.service cups-browsed.service >/dev/null 2>&1 || true
+    CUPS_SERVICES_STOPPED=1
+    find "$CUPS_SPOOL" -xdev -type f -exec shred -u -z -n 1 -- {} + >/dev/null 2>&1 || warn "Impossible d'écraser certains fichiers du spoule CUPS."
+    if ! umount "$CUPS_SPOOL" 2>/dev/null; then
+      warn "$CUPS_SPOOL est occupé ; tentative de démontage différé."
+      umount -l "$CUPS_SPOOL" 2>/dev/null || warn "Impossible de démonter $CUPS_SPOOL."
+    fi
+    CUPS_SPOOL_MOUNTED=0
+  fi
+
+  if (( CUPS_CACHE_MOUNTED )); then
+    if ! umount "$CUPS_CACHE" 2>/dev/null; then
+      warn "$CUPS_CACHE est occupé ; tentative de démontage différé."
+      umount -l "$CUPS_CACHE" 2>/dev/null || warn "Impossible de démonter $CUPS_CACHE."
+    fi
+    CUPS_CACHE_MOUNTED=0
+  fi
+  if (( CUPS_LOG_MOUNTED )); then
+    if ! umount "$CUPS_LOG" 2>/dev/null; then
+      warn "$CUPS_LOG est occupé ; tentative de démontage différé."
+      umount -l "$CUPS_LOG" 2>/dev/null || warn "Impossible de démonter $CUPS_LOG."
+    fi
+    CUPS_LOG_MOUNTED=0
+  fi
+
+  if (( CUPS_SERVICES_STOPPED )); then
     if (( CUPS_SOCKET_WAS_ACTIVE )); then
       systemctl start cups.socket >/dev/null 2>&1 || warn "Impossible de redémarrer cups.socket."
+    fi
+    if (( CUPS_PATH_WAS_ACTIVE )); then
+      systemctl start cups.path >/dev/null 2>&1 || warn "Impossible de redémarrer cups.path."
     fi
     if (( CUPS_WAS_ACTIVE )); then
       systemctl start cups.service >/dev/null 2>&1 || warn "Impossible de redémarrer CUPS."
     fi
-    CUPS_STOPPED=0
+    if (( CUPS_BROWSED_WAS_ACTIVE )); then
+      systemctl start cups-browsed.service >/dev/null 2>&1 || warn "Impossible de redémarrer cups-browsed."
+    fi
+    CUPS_SERVICES_STOPPED=0
   fi
 }
 
@@ -348,39 +404,63 @@ print_plates() {
     warn "Groupe lp absent : impression ignorée."
     return 0
   fi
-  if mountpoint -q "$CUPS_SPOOL"; then
-    warn "$CUPS_SPOOL est déjà un point de montage : impression ignorée par prudence."
+  if mountpoint -q "$CUPS_SPOOL" || mountpoint -q "$CUPS_CACHE" || mountpoint -q "$CUPS_LOG"; then
+    warn "Un répertoire CUPS est déjà un point de montage : impression ignorée par prudence."
     return 0
   fi
-  if [[ ! -d "$CUPS_SPOOL" ]]; then
-    warn "$CUPS_SPOOL n'existe pas : impression ignorée."
-    return 0
-  fi
+  for repertoire in "$CUPS_SPOOL" "$CUPS_CACHE" "$CUPS_LOG"; do
+    if [[ ! -d "$repertoire" ]]; then
+      warn "$repertoire n'existe pas : impression ignorée."
+      return 0
+    fi
+  done
 
   read -r -p "Imprimer les planches maintenant ? [o/N] " answer || answer=""
   [[ "$answer" =~ ^[oOyY]$ ]] || { info "Impression ignorée."; return 0; }
 
   CUPS_WAS_ACTIVE=0
   CUPS_SOCKET_WAS_ACTIVE=0
+  CUPS_PATH_WAS_ACTIVE=0
+  CUPS_BROWSED_WAS_ACTIVE=0
   if systemctl is-active --quiet cups.service; then
     CUPS_WAS_ACTIVE=1
   fi
   if systemctl is-active --quiet cups.socket; then
     CUPS_SOCKET_WAS_ACTIVE=1
   fi
+  if systemctl is-active --quiet cups.path; then
+    CUPS_PATH_WAS_ACTIVE=1
+  fi
+  if systemctl is-active --quiet cups-browsed.service; then
+    CUPS_BROWSED_WAS_ACTIVE=1
+  fi
 
-  info "Isolation du spoule CUPS en RAM..."
-  systemctl stop cups.socket cups.service 2>/dev/null || true
-  CUPS_STOPPED=1
-  install -d -m 0710 -o root -g lp "$CUPS_SPOOL"
-  if ! mount -t tmpfs -o size=512M,mode=0710,uid=0,gid="$(id -g lp)",nodev,nosuid tmpfs "$CUPS_SPOOL"; then
-    warn "Impossible de monter le tmpfs CUPS : impression ignorée."
+  info "Isolation des spoules, caches et journaux CUPS en RAM..."
+  systemctl stop cups.path cups.socket cups.service cups-browsed.service 2>/dev/null || true
+  CUPS_SERVICES_STOPPED=1
+
+  if ! mount -t tmpfs -o "$(cups_tmpfs_options 512M 0710)" tmpfs "$CUPS_SPOOL"; then
+    warn "Impossible de monter le tmpfs du spoule CUPS : impression ignorée."
     stop_cups_spool
     return 0
   fi
-  CUPS_MOUNTED=1
+  CUPS_SPOOL_MOUNTED=1
   install -d -m 1770 -o root -g lp "$CUPS_SPOOL/tmp"
   install -d -m 0770 -o root -g lp "$CUPS_SPOOL/cache"
+
+  if ! mount -t tmpfs -o "$(cups_tmpfs_options 128M 0750)" tmpfs "$CUPS_CACHE"; then
+    warn "Impossible de monter le tmpfs du cache CUPS : impression ignorée."
+    stop_cups_spool
+    return 0
+  fi
+  CUPS_CACHE_MOUNTED=1
+
+  if ! mount -t tmpfs -o "$(cups_tmpfs_options 64M 0750)" tmpfs "$CUPS_LOG"; then
+    warn "Impossible de monter le tmpfs des journaux CUPS : impression ignorée."
+    stop_cups_spool
+    return 0
+  fi
+  CUPS_LOG_MOUNTED=1
 
   if ! systemctl start cups.service; then
     warn "Impossible de démarrer CUPS : impression ignorée."
@@ -443,6 +523,54 @@ print_plates() {
   stop_cups_spool
 }
 
+proposer_suppression_anciennes_capsules() {
+  local mount_dir="$1" capsule_courante="$2"
+  local fichier base manifeste par2 answer
+  local -a anciennes=()
+
+  shopt -s nullglob
+  for fichier in "$mount_dir"/sauvegarde_qr_*.tar.zst.age; do
+    [[ -f "$fichier" ]] || continue
+    [[ "$(basename -- "$fichier")" == "$capsule_courante" ]] && continue
+    anciennes+=("$fichier")
+  done
+  shopt -u nullglob
+
+  if (( ${#anciennes[@]} == 0 )); then
+    return 0
+  fi
+
+  printf '\nAnciennes capsules présentes sur URGENCE_QR :\n'
+  for fichier in "${anciennes[@]}"; do
+    printf '  - %s\n' "$(basename -- "$fichier")"
+  done
+  warn "Le shred sur exFAT ne garantit pas l'effacement physique des cellules flash."
+  read -r -p "Supprimer ces anciennes capsules ? [o/N] " answer || answer=""
+  [[ "$answer" =~ ^[oOyY]$ ]] || { info "Anciennes capsules conservées."; return 0; }
+
+  for fichier in "${anciennes[@]}"; do
+    base="$(basename -- "$fichier")"
+    if ! shred -u -z -n 1 -- "$fichier"; then
+      warn "Impossible d'écraser $base."
+    fi
+    par2="${fichier}.par2"
+    if [[ -f "$par2" ]] && ! shred -u -z -n 1 -- "$par2"; then
+      warn "Impossible d'écraser $(basename -- "$par2")."
+    fi
+    for par2 in "$fichier".vol*.par2; do
+      [[ -f "$par2" ]] || continue
+      if ! shred -u -z -n 1 -- "$par2"; then
+        warn "Impossible d'écraser $(basename -- "$par2")."
+      fi
+    done
+    manifeste="${fichier%.tar.zst.age}.sha256"
+    if [[ -f "$manifeste" ]] && ! shred -u -z -n 1 -- "$manifeste"; then
+      warn "Impossible d'écraser $(basename -- "$manifeste")."
+    fi
+  done
+  ok "Anciennes capsules traitées."
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --device)
@@ -466,6 +594,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --garder-source)
       KEEP_SOURCE=1
+      shift
+      ;;
+    --allow-loopback)
+      ALLOW_LOOPBACK=1
       shift
       ;;
     -h|--help)
@@ -602,7 +734,7 @@ fi
 
 section "Création de l'enclave RAM"
 install -d -m 0700 "$RAM_MNT"
-RAM_OPTS="size=$RAM_SIZE,mode=0700,uid=$REAL_UID,gid=$REAL_GID,nodev,nosuid"
+RAM_OPTS="size=$RAM_SIZE,mode=0700,uid=$REAL_UID,gid=$REAL_GID,nodev,nosuid,noexec"
 if kernel_ge_6_4; then
   RAM_OPTS+=",noswap"
 else
@@ -720,6 +852,7 @@ CAPSULE="$TRAVAIL/$NOM.tar.zst.age"
 MANIFEST="$TRAVAIL/$NOM.sha256"
 info "Création de l'archive tar.zst.age (phrase de passe age demandée)..."
 warn "Si tu laisses la phrase vide, age en génère une : note-la immédiatement."
+install -m 600 -o "$REAL_UID" -g "$REAL_GID" /dev/null "$CAPSULE"
 if ! tar --numeric-owner -C "$TRAVAIL" -cf - "$NOM" \
   | zstd -19 -T0 \
   | runuser -u "$REAL_USER" -- env HOME="$RAM_HOME" PATH="$REAL_PATH" \
@@ -729,6 +862,9 @@ if ! tar --numeric-owner -C "$TRAVAIL" -cf - "$NOM" \
 fi
 [[ -s "$CAPSULE" ]] || die "La capsule age est vide."
 chmod 600 "$CAPSULE"
+if [[ -t 0 ]]; then
+  read -r -p "Si age a affiché une phrase auto-générée, note-la maintenant. Entrée pour continuer... " _ || true
+fi
 
 info "Création de 15 % de redondance par2..."
 par2 create -r15 -n1 "$CAPSULE"
@@ -818,6 +954,8 @@ if mount -o rw,noatime,nodev,nosuid,uid="$REAL_UID",gid="$REAL_GID",umask=077 "$
     fi
     URGENCE_COPIED=1
     ok "Partition d'urgence copiée et vérifiée."
+    proposer_suppression_anciennes_capsules \
+      "$URGENCE_MNT" "$(basename -- "$CAPSULE")"
   fi
   sync
   umount "$URGENCE_MNT"

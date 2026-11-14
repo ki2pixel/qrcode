@@ -60,6 +60,7 @@ Options :
   --export FICHIER     Copie un export JSON Binary Eye dans l'enclave RAM
   --afficher           Affiche la ligne extraite (mot de passe compris)
   --ram-size TAILLE    Taille du tmpfs (défaut : 512M)
+  --allow-loopback     Autorise un périphérique /dev/loopX (tests uniquement)
   -h, --help           Affiche cette aide
 
 Sans --id, --nom ou --restaurer, un menu interactif est proposé.
@@ -79,10 +80,13 @@ EXPORT_ARG=""
 AFFICHER=0
 RESTAURER=0
 RAM_SIZE="512M"
+ALLOW_LOOPBACK=0
 
 RAM_MOUNTED=0
 VAULT_MOUNTED=0
 MAPPER_OPEN=0
+SWAP_DISABLED=0
+SWAP_LIST=()
 
 DEV=""
 P1=""
@@ -114,20 +118,39 @@ cleanup() {
   fi
 
   if (( VAULT_MOUNTED )); then
-    umount "$VAULT_MNT" 2>/dev/null || umount -l "$VAULT_MNT" 2>/dev/null || true
+    if ! umount "$VAULT_MNT" 2>/dev/null; then
+      warn "$VAULT_MNT est occupé ; tentative de démontage différé."
+      umount -l "$VAULT_MNT" 2>/dev/null || warn "Impossible de démonter $VAULT_MNT."
+    fi
     VAULT_MOUNTED=0
   fi
   if (( MAPPER_OPEN )); then
-    cryptsetup close "$MAPPER" 2>/dev/null || true
+    if ! cryptsetup close "$MAPPER" 2>/dev/null; then
+      err "ATTENTION : le conteneur LUKS $MAPPER n'a pas pu être fermé (encore occupé) !"
+      rc=1
+    fi
     MAPPER_OPEN=0
   fi
   if (( RAM_MOUNTED )); then
-    umount "$RAM_MNT" 2>/dev/null || umount -l "$RAM_MNT" 2>/dev/null || true
+    if ! umount "$RAM_MNT" 2>/dev/null; then
+      warn "$RAM_MNT est occupé ; tentative de démontage différé."
+      umount -l "$RAM_MNT" 2>/dev/null || warn "Impossible de démonter $RAM_MNT."
+    fi
     RAM_MOUNTED=0
   fi
 
   sync 2>/dev/null || true
   echo 3 > /proc/sys/vm/drop_caches 2>/dev/null || true
+
+  if (( SWAP_DISABLED )); then
+    if (( ${#SWAP_LIST[@]} > 0 )); then
+      for swapdev in "${SWAP_LIST[@]}"; do
+        swapon -- "$swapdev" 2>/dev/null || warn "Impossible de réactiver le swap $swapdev."
+      done
+    fi
+    SWAP_DISABLED=0
+  fi
+
   exit "$rc"
 }
 trap cleanup EXIT
@@ -180,7 +203,7 @@ part_path() {
 is_system_disk() {
   local dev="$1" mp src top
   for mp in / /boot /boot/efi /home /var /usr /var/lib; do
-    src="$(findmnt -n -o SOURCE --target "$mp" 2>/dev/null || true)"
+    src="$(findmnt -n -v -o SOURCE --target "$mp" 2>/dev/null || true)"
     [[ -n "$src" ]] || continue
     top="$(lsblk -sno NAME "$src" 2>/dev/null | tail -n1 | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' || true)"
     [[ "$top" == "$(basename "$dev")" ]] && return 0
@@ -196,16 +219,19 @@ is_system_disk() {
 }
 
 validate_usb_device() {
-  local dev="$1" type rm tran ro size_bytes name
+  local dev="$1" type rm tran ro size_bytes bloc
 
   [[ -b "$dev" ]] || die "Périphérique bloc introuvable : $dev"
   type="$(lsblk_field TYPE "$dev")"
-  [[ "$type" == "disk" ]] || die "Passez le disque entier (ex. /dev/sdX), pas une partition."
-
-  rm="$(lsblk_field RM "$dev")"
-  tran="$(lsblk_field TRAN "$dev")"
-  if [[ "$rm" != "1" && "$tran" != "usb" ]]; then
-    die "Le périphérique n'est pas identifié comme amovible/USB (RM=$rm, TRAN=$tran)."
+  if (( ALLOW_LOOPBACK )) && [[ "$type" == "loop" ]]; then
+    info "Mode test loopback activé sur $dev."
+  else
+    [[ "$type" == "disk" ]] || die "Passez le disque entier (ex. /dev/sdX), pas une partition."
+    rm="$(lsblk_field RM "$dev")"
+    tran="$(lsblk_field TRAN "$dev")"
+    if [[ "$rm" != "1" && "$tran" != "usb" ]]; then
+      die "Le périphérique n'est pas identifié comme amovible/USB (RM=$rm, TRAN=$tran)."
+    fi
   fi
 
   ro="$(lsblk_field RO "$dev")"
@@ -217,14 +243,17 @@ validate_usb_device() {
     die "Refus : une partition de $dev est montée. Démontez-la d'abord."
   fi
 
-  if lsblk -nr -o TYPE "$dev" 2>/dev/null | grep -Eq '^(lvm|md|dm|crypt)$'; then
-    die "Refus : le périphérique participe à un volume LVM/MD/dm. Vérifiez avec lsblk."
+  if lsblk -nr -o TYPE "$dev" 2>/dev/null | grep -Eq '^(lvm|md|raid[0-9]*|linear|dm|crypt|multipath)$'; then
+    die "Refus : le périphérique participe à un volume LVM/RAID/dm. Vérifiez avec lsblk."
   fi
 
-  name="$(basename "$dev")"
-  if [[ -d "/sys/class/block/$name/holders" ]] && [[ -n "$(ls -A "/sys/class/block/$name/holders" 2>/dev/null || true)" ]]; then
-    die "Refus : le périphérique a des dépendances noyau (holders)."
-  fi
+  while IFS= read -r bloc; do
+    bloc="$(printf '%s' "$bloc" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+    [[ -n "$bloc" && -d "/sys/class/block/$bloc/holders" ]] || continue
+    if [[ -n "$(ls -A "/sys/class/block/$bloc/holders" 2>/dev/null || true)" ]]; then
+      die "Refus : le périphérique ou l'une de ses partitions a des dépendances noyau (holders)."
+    fi
+  done < <(lsblk -nrno NAME "$dev" 2>/dev/null || true)
 
   size_bytes="$(lsblk -bdn -o SIZE "$dev" 2>/dev/null | xargs || true)"
   [[ "$size_bytes" =~ ^[0-9]+$ ]] || die "Impossible de lire la taille de $dev."
@@ -366,6 +395,10 @@ while [[ $# -gt 0 ]]; do
       RAM_SIZE="$2"
       shift 2
       ;;
+    --allow-loopback)
+      ALLOW_LOOPBACK=1
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -418,7 +451,7 @@ resolve_real_user
 
 section "Vérification des dépendances"
 for cmd in cryptsetup lsblk findmnt mount umount mountpoint runuser mktemp \
-  install shred python3 sync stat cmp find cp chown chmod; do
+  install shred python3 sync stat cmp find cp chown chmod swapoff swapon; do
   require_cmd "$cmd"
 done
 
@@ -449,8 +482,21 @@ section "Hygiène et enclave RAM"
 ulimit -c 0 || die "Impossible de désactiver les core dumps."
 [[ "$(ulimit -c)" == "0" ]] || die "Les core dumps ne sont pas désactivés."
 
+mapfile -t SWAP_LIST < <(swapon --show=NAME --noheadings 2>/dev/null | awk 'NF {print $1}')
+if (( ${#SWAP_LIST[@]} > 0 )); then
+  info "Désactivation du swap (${SWAP_LIST[*]})..."
+  SWAP_DISABLED=1
+  swapoff -a
+  if swapon --show --noheadings 2>/dev/null | grep -q '[^[:space:]]'; then
+    die "Le swap est toujours actif après swapoff -a."
+  fi
+  ok "Swap désactivé ; il sera restauré à la sortie."
+else
+  warn "Aucun swap actif."
+fi
+
 install -d -m 0700 "$RAM_MNT"
-RAM_OPTS="size=$RAM_SIZE,mode=0700,uid=$REAL_UID,gid=$REAL_GID,nodev,nosuid"
+RAM_OPTS="size=$RAM_SIZE,mode=0700,uid=$REAL_UID,gid=$REAL_GID,nodev,nosuid,noexec"
 if kernel_ge_6_4; then
   RAM_OPTS+=",noswap"
 else
@@ -527,7 +573,9 @@ ok "Scans prêts dans $SCANS."
 section "Action"
 if (( RESTAURER )); then
   OUT_FILE="$SORTIES/restauration.csv"
-  restore_all "$OUT_FILE"
+  if ! restore_all "$OUT_FILE"; then
+    warn "La restauration présente une différence d'empreinte SHA-256. Inspecte $OUT_FILE en RAM avant de continuer."
+  fi
 elif [[ -n "$ID_ARG" ]]; then
   if [[ "$ID_ARG" =~ ^R[0-9]+$ ]]; then
     OUT_FILE="$SORTIES/entree_${ID_ARG}.csv"
@@ -563,7 +611,9 @@ else
       ;;
     3)
       OUT_FILE="$SORTIES/restauration.csv"
-      restore_all "$OUT_FILE"
+      if ! restore_all "$OUT_FILE"; then
+        warn "La restauration présente une différence d'empreinte SHA-256. Inspecte $OUT_FILE en RAM avant de continuer."
+      fi
       ;;
     0)
       exit 0

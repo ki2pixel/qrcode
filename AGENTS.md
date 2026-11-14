@@ -12,40 +12,41 @@ Documentation coffre USB : `docs/GUIDE_OPERATOIRE_COFFRE_USB.md` et `docs/Sauveg
 
 - **Génération QR autonome (hors clé USB)** :
   `./creer_sauvegarde_qr.sh export.csv [dossier_sortie]`
-  Dépendances : `split`, `qrencode`, Python 3.10+, paquet Python `weasyprint` (PDF). `SANS_PLANCHES=1` saute les planches ; sans WeasyPrint, les PDF ne sont pas produits (le HTML l'est).
+  Dépendances : `split`, `qrencode`, Python 3.10+, paquet Python `weasyprint` (PDF). `SANS_PLANCHES=1` saute les planches ; sans WeasyPrint, les scripts continuent et produisent le HTML.
+  Sources prises en charge : Bitwarden (`name`, `folder`, `login_uri`, `login_username`), KeePassXC (`Title`, `Group`, `URL`, `Username`) et colonnes génériques. Limite : 338 000 octets / 676 morceaux (`split -a 2`).
 - **Extraction ciblée (depuis la racine d'une sauvegarde)** :
   `python3 scripts/extraire_entree.py R123 --scans ./scans`
   `python3 scripts/extraire_entree.py --nom example.com --scans ./scans`
 - **Restauration complète (depuis la racine d'une sauvegarde)** :
   `python3 scripts/restaurer_sauvegarde.py --scans ./scans`
 - **Coffre USB — Initialisation du disque (DESTRUCTIF)** :
-  `sudo ./init_usb_coffre.sh [--argon2-mib 2048] [--argon2-threads 4] /dev/sdX`
+  `sudo ./init_usb_coffre.sh [--argon2-mib 2048] [--argon2-threads 4] [--allow-loopback] /dev/sdX`
   Dépendances : `parted`, `cryptsetup`, `mkfs.ext4`, `mkfs.exfat` (`exfatprogs`), `age`.
 - **Coffre USB — Orchestration de sauvegarde en RAM hermétique** :
-  `sudo ./executer_sauvegarde_ram.sh [--no-print] /dev/sdX [export.csv]`
+  `sudo ./executer_sauvegarde_ram.sh [--no-print] [--allow-loopback] /dev/sdX [export.csv]`
   Dépendances : `cryptsetup`, `age`, `par2` (`par2cmdline`), `zstd`, `qrencode`, `weasyprint`.
 - **Coffre USB — Consultation ou restauration en lecture seule** :
-  `sudo ./consulter_coffre_ro.sh [--id R123 | --nom TEXTE | --restaurer] [--export scans.json] [--afficher] /dev/sdX`
+  `sudo ./consulter_coffre_ro.sh [--id R123 | --nom TEXTE | --restaurer] [--export scans.json] [--afficher] [--allow-loopback] /dev/sdX`
 - **Contrôle syntaxique** :
   `python3 -m py_compile *.py && bash -n *.sh`
 
 ## Flux et architecture
 
 ### 1. Génération QR (`creer_sauvegarde_qr.sh`)
-- Découpage par `split -b 500` → `morceaux/morceau_aa…`.
+- Découpage par `split -a 2 -b 500` → `morceaux/morceau_aa…`.
 - Génération d'un QR code haute densité par morceau (`qrencode -s 16 -d 600`, format validé, ne pas réduire), préfixé de l'en-tête `LQR1 <suffixe> <n>/<total>\n` + octets bruts du payload.
 - Appel de `generer_index_qr.py --chunk-size 500 --qr-header --organise` : calcule les offsets d'octets, écrit `csv/index_enregistrements.csv`, `csv/index_morceaux.csv`, `json/index_meta.json`, HTML/PDF. Vérifie que chaque enregistrement se reconstruit exactement (code 2 sinon).
 - Appel de `generer_planches_qr.py` : produit `pdf/planches_qr.pdf` (compact 4×5/38 mm), `pdf/planches_qr_grand.pdf` (confort 3×4/54 mm) et `pdf/test_grand_8qr.pdf` (page de test 8 QR). Exige WeasyPrint pour le PDF, écrit toujours le HTML.
 - `extraire_entree.py` et `restaurer_sauvegarde.py` sont copiés dans `scripts/` du dossier de sauvegarde généré. Le second importe le premier (ils doivent rester dans le même dossier).
-- `restaurer_sauvegarde.py` s'appuie sur `index_morceaux.csv` (ordre/tailles) et `index_meta.json` (en-tête, `sha256`, `sha256_sans_nbsp`, `record_count`). Il teste CRLF/LF, avec ou sans saut de ligne final, et sort en code 1 si le résultat est `DIFFÉRENT`.
+- `restaurer_sauvegarde.py` s'appuie sur `index_morceaux.csv` (ordre/tailles) et `index_meta.json` (en-tête, `sha256`, `sha256_sans_nbsp`, `record_count`, `line_ending`, `final_newline`, `quote_all`). Il teste CRLF/LF, avec ou sans saut de ligne final, et sort en code 1 si le résultat est `DIFFÉRENT`.
 
 ### 2. Coffre USB chiffré et enclave RAM
 - **Structure bi-partitionnée de la clé USB** :
   - Partition 1 `COFFRE_LUKS` (~99 % de la clé) : conteneur LUKS2 durci (Argon2id 2048 Mio, 4 threads, AES-XTS 512 bits) formaté en ext4 (mode 0700). Contient les sauvegardes horodatées complètes et la capsule autonome.
-  - Partition 2 `URGENCE_QR` (255 Mo) : partition exFAT lisible sans outil sous Linux, macOS et Windows. Contient la capsule autonome `sauvegarde_qr_<nom>.tar.zst.age`, les fichiers de parité Reed-Solomon `sauvegarde_qr_<nom>.tar.zst.age.par2` (15 % de redondance), le manifeste SHA-256, la sauvegarde chiffrée de l'en-tête LUKS2 (`luks_header_qr.bak.age`) et `README.md`.
-- **Anti-rémanence stricte en mémoire vive (`executer_sauvegarde_ram.sh` / `consulter_coffre_ro.sh`)** :
-  - Désactivation du Swap système (`swapoff -a`) et désactivation des core dumps (`ulimit -c 0`).
-  - Montage d'un `tmpfs` dédié `/mnt/ram_sec` avec `-o noswap,nodev,nosuid,noexec,mode=0700`.
+  - Partition 2 `URGENCE_QR` (256 MiB) : partition exFAT lisible sans outil sous Linux, macOS et Windows. Contient la capsule autonome `sauvegarde_qr_<nom>.tar.zst.age`, les fichiers de parité Reed-Solomon `sauvegarde_qr_<nom>.tar.zst.age.par2` (15 % de redondance), le manifeste SHA-256, la sauvegarde chiffrée de l'en-tête LUKS2 (`luks_header_qr.bak.age`) et `README.md`.
+- **Anti-rémanence stricte en mémoire vive (`init_usb_coffre.sh`, `executer_sauvegarde_ram.sh` / `consulter_coffre_ro.sh`)** :
+  - Désactivation du Swap système (`swapoff -a`) et désactivation des core dumps (`ulimit -c 0`) pour les trois scripts, avec restauration du swap à la sortie.
+  - Montage d'un `tmpfs` dédié `/mnt/ram_sec` avec `-o noswap,nodev,nosuid,noexec,mode=0700`. `init_usb_coffre.sh` monte en plus un tmpfs dédié éphémère pour l'extraction de l'en-tête LUKS2 avant son chiffrement `age`.
   - Redirection de tous les fichiers temporaires et caches (`TMPDIR`, `XDG_CACHE_HOME`, etc.) dans le tmpfs.
   - Toute la génération QR et la manipulation de secrets se fait exclusivement en RAM.
   - À la clôture, écrasement sécurisé par `shred` / démontage de l'enclave et réactivation du swap.
@@ -57,6 +58,7 @@ Documentation coffre USB : `docs/GUIDE_OPERATOIRE_COFFRE_USB.md` et `docs/Sauveg
 
 - **DANGER PÉRIPHÉRIQUE /dev/sdX** : Ne JAMAIS exécuter `init_usb_coffre.sh` ou `executer_sauvegarde_ram.sh` sans vérifier formellement la lettre du disque cible (`lsblk -o NAME,MODEL,SIZE,TRAN,RM,FSTYPE`). `init_usb_coffre.sh` détruit irrémédiablement toutes les données du disque cible !
 - **Auto-montage de la partition exFAT** : Sous les environnements de bureau (ex. GNOME / Ubuntu), `URGENCE_QR` (`/dev/sdX2`) est monté automatiquement à l'insertion. Toujours le démonter (`udisksctl unmount -b /dev/sdX2` ou `umount`) avant de lancer les scripts du coffre USB.
+- **Formats de portefeuille** : Bitwarden et KeePassXC sont supportés nativement. Les colonnes `Title`/`Group`/`URL`/`Username` de KeePassXC sont mappées vers les champs internes de l'index ; les exports `QUOTE_ALL` sont restaurés octet pour octet.
 - **Export Binary Eye** : **JSON global uniquement**, `scans/binary_eye_all_qr.json`. Le CSV global aplatit les sauts de ligne des champs ; le TXT perd certains espaces de bord.
 - **Normalisation NBSP** : Binary Eye normalise les espaces insécables U+00A0 en espaces standards. `IDENTIQUE APRÈS NORMALISATION NBSP` est un succès ; `DIFFÉRENT` ne l'est pas. Le SHA sans NBSP est conservé dans `index_meta.json`.
 - **Encodage et Mojibake** : Le JSON peut contenir du Latin-1/CP1252 : les scripts essaient UTF-8, Latin-1 et CP1252. Ne pas réécrire les fichiers de scan à la main.
@@ -64,7 +66,7 @@ Documentation coffre USB : `docs/GUIDE_OPERATOIRE_COFFRE_USB.md` et `docs/Sauveg
 - **Affichage des secrets** : `extraire_entree.py` et `consulter_coffre_ro.sh` n'affichent pas le mot de passe sans le drapeau `--afficher`. Ne jamais ajouter de logging ou d'écho de secrets en clair.
 - **Secours vs flux nominal** : `--individuels` ignore le JSON global ; `--export` impose un fichier JSON précis. Ce sont des options de secours.
 - **Pérennité des formats** : Modifier `--chunk-size` (500 octets) invalide les index et scans existants ; modifier la taille des QR impose une réimpression complète.
-- **Plafond de segmentation** : Le pipeline actuel gère ≤ 676 morceaux (suffixes de deux lettres `aa`…`zz`, glob `morceau_??`). Au-delà, adapter `split -a` et les globs.
+- **Plafond de segmentation** : Le pipeline gère exactement ≤ 676 morceaux (338 000 octets, suffixes `aa`…`zz`, glob `morceau_??`). `split -a 2` est obligatoire ; au-delà, le script refuse le CSV au lieu de tronquer silencieusement.
 - **Permissions POSIX** : L'index ne contient pas les mots de passe, mais les noms, URL et identifiants restent des métadonnées sensibles. Permissions attendues : scripts 700 (`rwx------`), fichiers 600 (`rw-------`).
 - **Fichiers de documentation** : `README.md` est la documentation utilisateur racine. Le `LISEZMOI.txt` généré dans chaque sauvegarde est produit par un heredoc dans `creer_sauvegarde_qr.sh`. Maintenir la cohérence entre `README.md`, `LISEZMOI.txt` et `AGENTS.md` si le flux évolue.
 
@@ -78,7 +80,7 @@ Pas de suite de tests automatisés.
    - une extraction `--nom` retrouve la ligne attendue ;
    - tester CRLF et LF, avec et sans saut de ligne final.
 2. **Test des scripts USB / RAM** :
-   Utiliser impérativement des fichiers images temporaires loopback (`dd` ou `fallocate` + `losetup`) pour valider les scripts partitionnés et LUKS2 sans risquer un disque physique.
+   Utiliser impérativement des fichiers images temporaires loopback (`dd` ou `fallocate` + `losetup`) avec `--allow-loopback` pour valider les scripts partitionnés et LUKS2 sans risquer un disque physique. Isoler le `HOME` de test pour ne jamais toucher une sauvegarde d'en-tête réelle.
 3. **Contrôle de syntaxe obligatoire** :
    `python3 -m py_compile *.py && bash -n *.sh`
 

@@ -24,11 +24,11 @@ l'export d'origine, octet pour octet.
 from __future__ import annotations
 
 import argparse
-import codecs
 import csv
 import hashlib
 import io
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -42,26 +42,16 @@ import extraire_entree as ee  # noqa: E402
 
 
 def charger_morceaux(path: Path) -> list[dict]:
-    with path.open(newline="", encoding="utf-8") as f:
+    with path.open(newline="", encoding="utf-8-sig") as f:
         rows = list(csv.DictReader(f))
     rows.sort(key=lambda r: int(r["numero"]))
     return rows
 
 
-def est_prefixe_utf8(data: bytes) -> bool:
-    """Vrai si data est un début valide d'UTF-8 (fin incomplète acceptée)."""
-    decoder = codecs.getincrementaldecoder("utf-8")()
-    try:
-        decoder.decode(data, final=False)
-    except UnicodeDecodeError:
-        return False
-    return True
-
-
 def reconstruire_csv(data: bytes) -> tuple[bytes, list[list[str]]]:
-    """Reconstruit le CSV avec des fins de ligne CRLF."""
+    """Reconstruit le CSV avec des fins de ligne CRLF (repli historique)."""
     texte = data.decode("utf-8")
-    rows = list(csv.reader(io.StringIO(texte)))
+    rows = list(csv.reader(io.StringIO(texte, newline="")))
     buf = io.StringIO(newline="")
     writer = csv.writer(buf, lineterminator="\r\n")
     writer.writerows(rows)
@@ -69,15 +59,102 @@ def reconstruire_csv(data: bytes) -> tuple[bytes, list[list[str]]]:
     return resultat, rows
 
 
+def convertir_fins_hors_guillemets(data: bytes, cible: bytes) -> bytes:
+    """Convertit les fins d'enregistrement sans toucher aux champs quotés."""
+    sortie = bytearray()
+    dans_guillemets = False
+    i = 0
+    while i < len(data):
+        octet = data[i]
+        if octet == 0x22:  # "
+            sortie.append(octet)
+            if dans_guillemets and i + 1 < len(data) and data[i + 1] == 0x22:
+                sortie.append(0x22)
+                i += 2
+                continue
+            dans_guillemets = not dans_guillemets
+            i += 1
+            continue
+        if not dans_guillemets:
+            if data[i : i + 2] == b"\r\n":
+                sortie.extend(cible)
+                i += 2
+                continue
+            if octet in (0x0A, 0x0D):
+                sortie.extend(cible)
+                i += 1
+                continue
+        sortie.append(octet)
+        i += 1
+    return bytes(sortie)
+
+
 def variantes_fins_de_ligne(data: bytes) -> list[bytes]:
-    """Renvoie les variantes CRLF/LF, avec ou sans fin de ligne finale."""
+    """Renvoie les variantes brutes CRLF/LF, avec ou sans fin de ligne finale."""
     variantes = [data]
-    if data.endswith(b"\r\n"):
-        variantes.append(data[:-2])
-    return variantes + [v.replace(b"\r\n", b"\n") for v in variantes]
+    for fin in (b"\r\n", b"\n", b"\r"):
+        if data.endswith(fin):
+            variantes.append(data[: -len(fin)])
+            break
+    bases = list(variantes)
+    for variante in bases:
+        converties = (
+            variante.replace(b"\r\n", b"\n"),
+            convertir_fins_hors_guillemets(variante, b"\r\n"),
+            convertir_fins_hors_guillemets(variante, b"\n"),
+        )
+        for candidate in converties:
+            if candidate not in variantes:
+                variantes.append(candidate)
+    return variantes
+
+
+def analyser_csv(data: bytes) -> list[list[str]] | None:
+    """Parse un CSV UTF-8 pour compter les enregistrements d'un candidat."""
+    try:
+        texte = data.decode("utf-8")
+        return list(csv.reader(io.StringIO(texte, newline="")))
+    except (UnicodeDecodeError, csv.Error):
+        return None
+
+
+def evaluer_candidat(
+    data: bytes,
+    sha_attendu: str | None,
+    sha_sans_nbsp_attendu: str | None,
+) -> list[tuple[bool, bool, str, str, int, list[list[str]], bytes]]:
+    """Évalue les variantes de fin de ligne d'un flux brut sans le réécrire."""
+    resultats = []
+    for restaure in variantes_fins_de_ligne(data):
+        digest = hashlib.sha256(restaure).hexdigest()
+        digest_sans_nbsp = hashlib.sha256(
+            restaure.replace(b"\xc2\xa0", b" ")
+        ).hexdigest()
+        exact = digest == sha_attendu
+        normalise = bool(sha_sans_nbsp_attendu) and (
+            digest_sans_nbsp == sha_sans_nbsp_attendu
+        )
+        if not exact and not normalise:
+            continue
+        rows = analyser_csv(restaure)
+        if rows is None:
+            continue
+        resultats.append(
+            (
+                exact,
+                normalise,
+                digest,
+                digest_sans_nbsp,
+                len(restaure),
+                rows,
+                restaure,
+            )
+        )
+    return resultats
 
 
 def main() -> int:
+    os.umask(0o077)
     parser = argparse.ArgumentParser(
         description="Restaure le CSV complet depuis les scans et vérifie le SHA-256."
     )
@@ -137,9 +214,16 @@ def main() -> int:
     scan_dir = Path(args.scans)
     if not scan_dir.is_dir():
         raise SystemExit(f"Dossier de scans introuvable : {scan_dir}")
+    for chemin, libelle in (
+        (Path(args.morceaux), "Index des morceaux"),
+        (Path(args.meta), "Métadonnées"),
+    ):
+        if not chemin.is_file():
+            raise SystemExit(f"{libelle} introuvable : {chemin}")
 
     morceaux = charger_morceaux(Path(args.morceaux))
-    meta = json.loads(Path(args.meta).read_text(encoding="utf-8"))
+    meta = json.loads(Path(args.meta).read_text(encoding="utf-8-sig"))
+    total_chunks = int(meta.get("total_chunks", 0)) or None
     sha_attendu = meta.get("sha256")
     sha_sans_nbsp_attendu = meta.get("sha256_sans_nbsp")
     taille_attendue = int(meta.get("size", 0))
@@ -153,12 +237,12 @@ def main() -> int:
             export_path = Path(args.export)
             if not export_path.is_file():
                 raise SystemExit(f"Export introuvable : {export_path}")
-            mapping_export = ee.charger_export_json(export_path)
+            mapping_export = ee.charger_export_json(export_path, total_chunks)
         else:
             auto = scan_dir / "binary_eye_all_qr.json"
             if auto.is_file():
                 export_path = auto
-                mapping_export = ee.charger_export_json(auto)
+                mapping_export = ee.charger_export_json(auto, total_chunks)
 
     mapping = ee.indexer_scans(scan_dir) if mapping_export is None else {}
     candidats_par_morceau: list[list[bytes]] = []
@@ -187,6 +271,7 @@ def main() -> int:
                 )
         if any(ee.semble_traduit(c) for c in candidats):
             traduits.append(str(source))
+        candidats = ee.ordonner_candidats(candidats, int(row["taille_octets"]))
         candidats_par_morceau.append(candidats)
 
     if manquants:
@@ -201,57 +286,58 @@ def main() -> int:
             + "\nRéexporte-les avec Binary Eye, sans traduction."
         )
 
-    # On garde toutes les combinaisons d'encodage qui restent un préfixe
-    # UTF-8 valide. En pratique il y en a très peu : la plupart des morceaux
-    # sont ASCII, et les deux encodages ne diffèrent que sur les accents.
-    etats: list[tuple[bytes, list[bytes]]] = [(b"", [])]
-    for i, candidats in enumerate(candidats_par_morceau):
-        nouveaux: list[tuple[bytes, list[bytes]]] = []
-        for prefixe, choix in etats:
-            for cand in candidats:
-                data = prefixe + cand
-                if est_prefixe_utf8(data):
-                    nouveaux.append((data, choix + [cand]))
-        vus: set[bytes] = set()
-        etats = []
-        for data, choix in nouveaux:
-            if data not in vus:
-                vus.add(data)
-                etats.append((data, choix))
-        if not etats:
-            raise SystemExit(
-                f"Aucun encodage valide pour le morceau "
-                f"{morceaux[i]['morceau']}."
-            )
+    # Recherche bornée, sans produit cartésien : la validité UTF-8 n'est
+    # contrôlée qu'à la frontière de chaque morceau.
+    tailles_attendues = [int(row["taille_octets"]) for row in morceaux]
+    etats, tronque = ee.construire_candidats_complets(
+        candidats_par_morceau, tailles_attendues
+    )
+    if tronque:
+        print(
+            "Attention : la recherche d'encodages a été limitée "
+            f"à {ee.MAX_ETATS} états.",
+            file=sys.stderr,
+        )
+    if not etats:
+        raise SystemExit("Aucun encodage UTF-8 valide n'a pu être reconstruit.")
 
+    # Priorité absolue au flux brut : aucune réécriture csv.writer avant le
+    # calcul du SHA-256. C'est ce qui préserve les exports QUOTE_ALL.
     resultats = []
-    for data, _choix in etats:
-        try:
-            avec_final, rows = reconstruire_csv(data)
-        except (UnicodeDecodeError, csv.Error):
-            continue
-        # L'export d'origine peut utiliser CRLF ou LF, avec ou sans retour à la
-        # ligne après le dernier champ. On essaie toutes les variantes.
-        for restaure in variantes_fins_de_ligne(avec_final):
-            digest = hashlib.sha256(restaure).hexdigest()
-            digest_sans_nbsp = hashlib.sha256(
-                restaure.replace(b"\xc2\xa0", b" ")
-            ).hexdigest()
-            exact = digest == sha_attendu
-            normalise = bool(sha_sans_nbsp_attendu) and (
-                digest_sans_nbsp == sha_sans_nbsp_attendu
+    for data in etats:
+        resultats.extend(
+            evaluer_candidat(
+                data,
+                sha_attendu,
+                sha_sans_nbsp_attendu,
             )
-            resultats.append(
-                (
-                    exact,
-                    normalise,
-                    digest,
-                    digest_sans_nbsp,
-                    len(restaure),
-                    rows,
-                    restaure,
+        )
+
+    # Repli uniquement si aucun flux brut ne correspond exactement : les
+    # anciens scans peuvent avoir normalisé des fins de ligne hors guillemets.
+    if not any(resultat[0] for resultat in resultats):
+        for data in etats:
+            try:
+                avec_final, rows = reconstruire_csv(data)
+            except (UnicodeDecodeError, csv.Error):
+                continue
+            for restaure in variantes_fins_de_ligne(avec_final):
+                digest = hashlib.sha256(restaure).hexdigest()
+                digest_sans_nbsp = hashlib.sha256(
+                    restaure.replace(b"\xc2\xa0", b" ")
+                ).hexdigest()
+                resultats.append(
+                    (
+                        digest == sha_attendu,
+                        bool(sha_sans_nbsp_attendu)
+                        and digest_sans_nbsp == sha_sans_nbsp_attendu,
+                        digest,
+                        digest_sans_nbsp,
+                        len(restaure),
+                        rows,
+                        restaure,
+                    )
                 )
-            )
 
     if not resultats:
         raise SystemExit("Impossible de reconstruire un CSV valide depuis les scans.")

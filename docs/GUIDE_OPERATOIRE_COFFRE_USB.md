@@ -11,7 +11,7 @@ La clé USB est organisée en deux partitions distinctes :
    * Chiffrement LUKS2 durci (Argon2id 2 Gio RAM, 4 threads, AES-XTS 512 bits).
    * Contient les sauvegardes horodatées complètes (dossiers de QR codes, PDF pour impression, index CSV/HTML).
    * Contient la capsule autonome de secours `tar.zst.age` et ses blocs de réparation Reed-Solomon `par2` (15 % de redondance).
-2. **Partition 2 (`URGENCE_QR` - 255 Mo, exFAT lisible partout) :**
+2. **Partition 2 (`URGENCE_QR` - 256 MiB, exFAT lisible partout) :**
    * Lisible nativement sous Linux, macOS et Windows sans nécessiter LUKS.
    * Contient la capsule de secours chiffrée, les fichiers de réparation `.par2`, le fichier `README.md` et l'en-tête LUKS2 chiffré (`luks_header_qr.bak.age`).
 
@@ -59,18 +59,26 @@ Le script prépare l'enclave et se met en attente :
 ```text
 Appuie sur Entrée quand le fichier est prêt (q pour annuler) :
 ```
-Ouvrez un **deuxième terminal** (ou `Ctrl+Shift+T`) et copiez votre export :
-```bash
-cp ~/Documents/qrcode/export.csv /mnt/ram_sec/travail/export.csv
+Exportez **directement** votre portefeuille depuis le gestionnaire de mots de passe
+vers :
+```text
+/mnt/ram_sec/travail/export.csv
 ```
-*(Ou exportez directement depuis votre gestionnaire de mots de passe vers `/mnt/ram_sec/travail/export.csv`).*
+Ne copiez jamais un export en clair depuis `~/Documents`, `~/Téléchargements`
+ou `/tmp` : cela réintroduirait une rémanence sur le SSD et contredirait le
+modèle de sécurité. Si le CSV existe déjà sur le disque, utilisez
+`executer_sauvegarde_ram.sh /dev/sdX /chemin/export.csv` et lisez
+attentivement l'avertissement : `shred` ne garantit pas l'effacement sur
+SSD/NVMe. Les exports KeePassXC (`Title`, `Group`, `URL`, `Username`) et
+Bitwarden sont acceptés.
 
 ### Étape 4 : Valider et saisir les phrases secrètes
 1. Revenez sur le premier terminal et appuyez sur **Entrée**.
-2. **Phrase age :** Définissez la phrase secrète protégeant la capsule autonome `tar.zst.age`.
+2. **Phrase age :** Définissez la phrase secrète protégeant la capsule autonome `tar.zst.age`. Si `age` affiche une phrase auto-générée, notez-la avant d'appuyer sur Entrée : le script marque une pause exprès.
 3. **Phrase LUKS2 :** Saisissez la phrase de passe de votre coffre USB pour permettre le montage et la copie.
 4. Le script synchronise les fichiers, vérifie les empreintes SHA-256, nettoie la RAM par `shred`, réactive le swap système et referme le coffre.
-5. Vous pouvez retirer la clé USB en toute sécurité.
+5. Après vérification de la nouvelle capsule, le script propose de supprimer les anciennes capsules de `URGENCE_QR` par `shred` (les cellules flash ne peuvent toutefois pas être garanties effacées physiquement).
+6. Vous pouvez retirer la clé USB en toute sécurité.
 
 ---
 
@@ -90,6 +98,11 @@ cd ~/Documents/qrcode
 # Remplacer sdX par votre périphérique réel (ex: sdf)
 sudo ./consulter_coffre_ro.sh /dev/sdX
 ```
+
+Pour un test sur image loopback uniquement, ajoutez `--allow-loopback` et
+utilisez un `HOME` temporaire : `init_usb_coffre.sh` écrit son en-tête age
+dans le répertoire personnel de l'utilisateur `sudo`. Ne testez jamais
+`init_usb_coffre.sh` sur un disque physique sans confirmation explicite.
 
 ### Étape 3 : Déverrouillage et scans
 1. Saisissez votre phrase de passe LUKS2. Le coffre est monté en **lecture seule stricte** (`mount -o ro,noload`).
@@ -124,10 +137,10 @@ Puisque les fichiers sont confinés en mémoire vive et vous appartiennent (`chm
   wc -l /mnt/ram_sec/sorties/restauration.csv
   ```
 
-* **Copier le fichier sur votre machine (pour réimport ou usage) :**
-  ```bash
-  cp /mnt/ram_sec/sorties/restauration.csv ~/Documents/mon_export_restaure.csv
-  ```
+* **Persister le résultat :** ne copiez **jamais** ce fichier vers
+  `~/Documents` ou un autre support non chiffré. Importez-le directement dans
+  votre gestionnaire de mots de passe, ou écrivez-le sur un volume chiffré.
+  Sinon, inspectez-le en RAM puis laissez l'enclave le détruire.
 
 ### Étape 5 : Clôture et nettoyage
 Revenez sur le **premier terminal** et appuyez sur **Entrée** :
@@ -170,7 +183,7 @@ shred -u -z -n 3 /dev/shm/luks_header.bak
 
 ## 4. Règles d'hygiène cryptographique
 
-* **Suppression du CSV source :** Une fois votre sauvegarde vérifiée et/ou imprimée, détruisez `~/Documents/qrcode/export.csv` avec `shred -u -z -n 3 export.csv` pour éviter toute persistance sur SSD.
+* **Suppression du CSV source :** Exportez directement dans l'enclave RAM. Si un export en clair a déjà été écrit dans `~/Documents`, détruisez-le avec `shred -u -z -n 3 export.csv`, en sachant que `shred` ne garantit pas l'effacement physique sur SSD/NVMe. Ne conservez jamais l'export dans `~/Documents` comme emplacement de travail.
 * **Mise à jour de mot de passe :** Si vous modifiez la phrase de passe LUKS2 de la clé, vous **devez** régénérer la sauvegarde d'en-tête chiffrée (`luks_header_qr.bak.age`), sinon restaurer un ancien en-tête réactiverait l'ancienne phrase.
 
 ---

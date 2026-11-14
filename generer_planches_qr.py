@@ -57,7 +57,6 @@ def construire_html(
     per_page = cols * rows
     pages = [qr_files[i : i + per_page] for i in range(0, len(qr_files), per_page)]
     source = meta.get("source", "—")
-    total = len(qr_files)
 
     pages_html = []
     for page_no, page_items in enumerate(pages, 1):
@@ -132,7 +131,7 @@ def construire_html(
     width: {100 / cols:.4f}%;
     text-align: center;
     vertical-align: top;
-    padding: 1.5mm;
+    padding: 1mm;
   }}
   img {{
     width: {qr_mm}mm;
@@ -164,6 +163,7 @@ def construire_html(
 
 
 def main() -> int:
+    os.umask(0o077)
     parser = argparse.ArgumentParser(
         description="Génère les planches A4 de QR codes avec étiquettes."
     )
@@ -224,8 +224,11 @@ def main() -> int:
     html_path.chmod(0o600)
 
     if HTML is None:
-        print("WeasyPrint absent : PDF non généré.", file=sys.stderr)
-        return 1
+        print(
+            "WeasyPrint absent : PDF non généré, HTML conservé.",
+            file=sys.stderr,
+        )
+        return 0
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
