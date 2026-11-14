@@ -1,0 +1,37 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environnements virtuels
+.venv/
+venv/
+ENV/
+env/
+
+# Fichiers et dossiers générés par les sauvegardes
+sauvegarde_qr_*/
+sauvegarde_*/
+morceaux/
+qrcodes/
+scans/
+csv/
+json/
+pdf/
+html/
+planches/
+
+# Extractions et restaurations
+entree_*.csv
+restauration.csv
+*.qrpayload
+
+# Sécurité : exports de mots de passe et fichiers temporaires
+*.csv
+*.tmp
+*.log
+
+# Caches et fichiers système
+.DS_Store
+Thumbs.db
+.cache/
