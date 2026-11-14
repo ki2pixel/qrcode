@@ -34,10 +34,10 @@ Audit de sécurité de l'interface web : `docs/Rapport-daudit-de-securite-fronte
   `--ram-size` : défaut `512M`, minimum `128M`. `--id`, `--nom` et `--restaurer` sont incompatibles.
 - **Lancement des scripts USB** : toujours via `sudo` depuis un compte non-root (`SUDO_USER`) ; `sudo -i` est refusé.
 - **Interface web locale optionnelle** :
-  `./lancer_interface.sh [--strict-ram] [--no-browser]`
+  `./lancer_interface.sh [--strict-ram] [--no-browser]` ou double-clic sur le lanceur graphique portable `sauvegarde_qr_web.desktop` à la racine (FreeDesktop standard, `Terminal=true` pour garantir l'arrêt propre et la purge tmpfs à la fermeture de la fenêtre).
   Écoute uniquement `127.0.0.1:5100`, jeton dans le fragment d'URL échangé contre un cookie local, expiration des données après 60 min d'inactivité. Dépendances isolées dans `.venv/` (`requirements.txt`, Flask 3.1), créé avec `--system-site-packages` pour conserver WeasyPrint/Pango/Cairo système. Le pipeline QR et les scripts d'extraction utilisent le Python système capturé par le lanceur, pas le `.venv`.
 - **Contrôle syntaxique** :
-  `python3 -m py_compile *.py && python3 -m compileall -q web && bash -n *.sh`
+  `python3 -m py_compile *.py && python3 -m compileall -q web && bash -n *.sh && desktop-file-validate sauvegarde_qr_web.desktop`
 
 ## Flux et architecture
 
@@ -94,6 +94,7 @@ Audit de sécurité de l'interface web : `docs/Rapport-daudit-de-securite-fronte
 - **Interface web — périmètre des secrets** : les téléchargements (PDF, archive ZIP, CSV extrait/restauré) sortent volontairement du tmpfs et contiennent des données en clair. Les scans et index en RAM sont purgés à l'arrêt, mais un téléchargement déjà écrit sur disque reste. Le web ne remplace pas le flux USB anti-rémanence pour les secrets critiques.
 - **Interface web — USB** : `web/services/usb.py` lit `lsblk`, peut démonter une partition montée d'un disque amovible sûr avec `udisksctl unmount --no-user-interaction -b` (sans `sudo`, sans `-f`/`-l`), puis génère des commandes. Ne jamais y ajouter d'appel à `sudo`, de réception de phrase de passe ou d'exécution privilégiée. La cible de `POST /api/usb/demonter` et celle de `POST /api/usb/commandes` doivent être revalidées à chaque appel contre l'état `lsblk` courant, jamais contre la seule entrée envoyée par le navigateur. Ne pas réintroduire de cases à cocher « vérifié/démonté » : la confirmation est réservée à `init` et le backend contrôle lui-même le montage. Un périphérique `/dev/loopX` exige la case « mode test » ; une taille RAM `2G` doit être convertie en MiB avant comparaison au minimum.
 - **Interface web — Python des sous-processus** : le pipeline QR et les scripts d'extraction doivent utiliser le Python système (`QRCODE_PYTHON_SYSTEM` capturé par `lancer_interface.sh`) et non `.venv/bin/python`, sinon WeasyPrint et ses liaisons C peuvent manquer. Le `.venv` doit rester créé avec `--system-site-packages`.
+- **Lanceur de bureau (.desktop)** : `sauvegarde_qr_web.desktop` est configuré avec `Terminal=true` pour garantir l'arrêt ordonné et la purge systématique de l'enclave tmpfs par `espace_ram.arreter_ram()`. La commande `Exec` explore dynamiquement les cibles (`%k`, `$GIO_LAUNCHED_DESKTOP_FILE`, `$PWD`, `Path=`), et `lancer_interface.sh` maintient la directive `Path=` alignée avec le dossier courant. Permissions attendues : 700 (`rwx------`).
 
 ## Vérification d'un changement
 

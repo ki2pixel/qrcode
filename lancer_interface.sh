@@ -14,6 +14,10 @@ export PIP_DISABLE_PIP_VERSION_CHECK=1
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 cd -- "$SCRIPT_DIR"
 
+if [[ -f "$SCRIPT_DIR/sauvegarde_qr_web.desktop" ]] && ! grep -qF "Path=$SCRIPT_DIR" "$SCRIPT_DIR/sauvegarde_qr_web.desktop" 2>/dev/null; then
+  sed -i "s|^Path=.*|Path=$SCRIPT_DIR|" "$SCRIPT_DIR/sauvegarde_qr_web.desktop" 2>/dev/null || true
+fi
+
 die() { printf '[ERREUR] %s\n' "$*" >&2; exit 1; }
 info() { printf '[INFO] %s\n' "$*"; }
 warn() { printf '[ATTENTION] %s\n' "$*" >&2; }

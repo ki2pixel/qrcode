@@ -1,0 +1,18 @@
+# Lanceur de bureau pour l'interface web locale.
+# Compatible GNOME Nautilus (Path=), KDE/XFCE (%k) et menu d'applications.
+# Terminal=true est requis pour que la fermeture de fenêtre ou Ctrl+C
+# arrête proprement le serveur et purge l'enclave tmpfs.
+[Desktop Entry]
+Type=Application
+Name=Sauvegarde QR — Interface Web Locale
+Name[fr]=Sauvegarde QR — Interface Web Locale
+GenericName=Gestionnaire de sauvegarde QR et coffre-fort USB
+GenericName[fr]=Gestionnaire de sauvegarde QR et coffre-fort USB
+Comment=Lancer l'interface web locale hermétique pour la sauvegarde QR de mots de passe
+Comment[fr]=Lancer l'interface web locale hermétique pour la sauvegarde QR de mots de passe
+Exec=bash -c "for d in \"\$(dirname \"\$1\")\" \"\$(dirname \"\$(readlink -f \"\$GIO_LAUNCHED_DESKTOP_FILE\")\")\" \"\$PWD\" \"/home/kidpixel/Documents/qrcode\"; do if [ -x \"\$d/lancer_interface.sh\" ]; then cd \"\$d\" && exec ./lancer_interface.sh; fi; done; exit 1" _ %k
+Path=/home/kidpixel/Documents/qrcode
+Icon=security-high
+Terminal=true
+Categories=System;Security;
+StartupNotify=false

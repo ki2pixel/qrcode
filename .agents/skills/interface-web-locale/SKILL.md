@@ -27,7 +27,7 @@ dans un répertoire de travail privé sur tmpfs (`0700`, `umask 077`, core dumps
 désactivés). Les téléchargements (PDF, ZIP, CSV extrait ou restauré) sortent
 volontairement de la RAM et contiennent des données en clair.
 
-Lancement : `./lancer_interface.sh [--strict-ram] [--no-browser]`.
+Lancement : `./lancer_interface.sh [--strict-ram] [--no-browser]` ou double-clic sur le lanceur graphique portable `sauvegarde_qr_web.desktop` à la racine (FreeDesktop standard, `Terminal=true` pour garantir l'arrêt propre et la purge tmpfs à la fermeture de la fenêtre).
 `--strict-ram` refuse le démarrage si un swap disque est actif ;
 `--no-browser` est utilisé pour les tests et l'automatisation.
 
@@ -75,7 +75,8 @@ Ne pas utiliser ce skill pour :
 | Secrets | Masqués par défaut, révélation explicite, re-masquage automatique ; URI rédigée, URI complète réservée à `/reveler`, purge DOM à l'expiration et à la purge | Revue de `consultation.js` et tests 401 |
 | USB | Aucun `sudo`, aucune phrase de passe, démontage uniquement via `udisksctl unmount --no-user-interaction` ; loopbacks sûrs montés inclus | `web/services/usb.py`, tests avec faux `lsblk` |
 | Langue | Interface, messages, commentaires et nommage en français | Revue |
-| Permissions | Scripts `700`, documents et sources `600` | `stat -c '%a %n'` |
+| Lanceur | Fichier `.desktop` standard portable à la racine, `Terminal=true` (fermeture de fenêtre ou `Ctrl+C` stoppe le serveur et purge le tmpfs), validé par `desktop-file-validate` | `desktop-file-validate sauvegarde_qr_web.desktop` |
+| Permissions | Scripts et lanceur `.desktop` `700`, documents et sources `600` | `stat -c '%a %n'` |
 
 ## Cartographie frontend
 
@@ -888,7 +889,7 @@ Le changement est terminé seulement si :
   préservés ;
 - [ ] les textes et commentaires sont en français ;
 - [ ] `python3 -m py_compile *.py && python3 -m compileall -q web &&
-  bash -n *.sh` réussit ;
+  bash -n *.sh && desktop-file-validate sauvegarde_qr_web.desktop` réussit ;
 - [ ] `git diff --check` ne signale rien ;
 - [ ] le chargement réel via `./lancer_interface.sh --no-browser` ne produit
   aucune erreur console ;

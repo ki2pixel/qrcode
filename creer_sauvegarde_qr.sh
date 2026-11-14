@@ -252,6 +252,7 @@ Depuis le dossier racine du dépôt qrcode, une interface guidée peut ouvrir ce
 dossier de sauvegarde sans écrire sur le disque :
 
     ./lancer_interface.sh
+    (ou double-clic sur sauvegarde_qr_web.desktop)
 
 Elle écoute uniquement sur 127.0.0.1:5100 et affiche une URL avec un jeton
 changeant à chaque lancement. Elle permet de générer une sauvegarde, d'importer

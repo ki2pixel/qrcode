@@ -537,6 +537,18 @@ Une interface guidée en français peut remplacer les commandes pour les
 opérations courantes. Elle reste **strictement locale** : le serveur écoute
 uniquement sur `127.0.0.1:5100` et n’ouvre aucune connexion sortante.
 
+Elle peut être lancée de deux manières :
+
+- **Graphiquement (sans ouvrir de terminal préalablement)** : double-cliquez
+  sur le fichier `sauvegarde_qr_web.desktop` à la racine du dépôt (ou créez un
+  raccourci dans `~/.local/share/applications/`). Une fenêtre de terminal
+  s’ouvre automatiquement pour afficher l’URL et gérer l’arrêt propre :
+  fermer cette fenêtre ou presser `Ctrl+C` arrête le serveur et purge
+  immédiatement l’enclave temporaire en RAM.
+  *(Sous GNOME/Nautilus, faites un clic droit sur le fichier puis « Autoriser le lancement » lors de la première utilisation).*
+
+- **En ligne de commande** :
+
 ```bash
 ./lancer_interface.sh
 ```

@@ -460,7 +460,20 @@ def main() -> int:
             target=lambda: webbrowser.open(url, new=2), daemon=True
         ).start()
 
+    arret_demande = False
+
     def arreter(signum, frame):
+        nonlocal arret_demande
+        if arret_demande:
+            return
+        arret_demande = True
+        # Un terminal peut envoyer plusieurs SIGHUP lors de sa fermeture.
+        # Ignorer les signaux suivants évite d'interrompre la purge tmpfs.
+        for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+            try:
+                signal.signal(sig, signal.SIG_IGN)
+            except (OSError, ValueError):
+                pass
         raise KeyboardInterrupt
 
     signal.signal(signal.SIGINT, arreter)
@@ -476,8 +489,10 @@ def main() -> int:
             serveur.server_close()
         except Exception:
             pass
-        REGISTRE.arreter()
-        espace_ram.arreter_ram()
+        try:
+            REGISTRE.arreter()
+        finally:
+            espace_ram.arreter_ram()
         print("Session purgée. À bientôt.", file=sys.stderr)
     return 0
 
