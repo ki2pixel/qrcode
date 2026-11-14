@@ -411,7 +411,9 @@ install -d -m 0700 "$URGENCE_MNT"
 if mount -o rw,noatime,nodev,nosuid,uid="$REAL_UID",gid="$REAL_GID",umask=077 "$P2" "$URGENCE_MNT"; then
   URGENCE_MOUNTED=1
   cp -- "$AGE_HDR" "$URGENCE_MNT/"
-  if [[ -f "$SCRIPT_DIR/LISEZMOI.md" ]]; then
+  if [[ -f "$SCRIPT_DIR/README.md" ]]; then
+    cp -- "$SCRIPT_DIR/README.md" "$URGENCE_MNT/"
+  elif [[ -f "$SCRIPT_DIR/LISEZMOI.md" ]]; then
     cp -- "$SCRIPT_DIR/LISEZMOI.md" "$URGENCE_MNT/"
   fi
   sync

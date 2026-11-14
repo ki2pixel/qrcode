@@ -2,7 +2,7 @@
 
 Petit outil autonome (Bash + Python) qui transforme un export CSV de mots de passe en QR codes imprimés, puis extrait une entrée ou restaure le CSV. Les données sont réelles et sensibles : utiliser uniquement des CSV synthétiques pour les tests, ne jamais afficher un mot de passe sans nécessité.
 
-Pas de manifeste, lockfile, CI, linter ni suite de tests. Les scripts et messages sont en français ; conserver ce choix. Flux utilisateur détaillé : `LISEZMOI.md`.
+Pas de manifeste, lockfile, CI, linter ni suite de tests. Les scripts et messages sont en français ; conserver ce choix. Flux utilisateur détaillé : `README.md`.
 
 ## Commandes
 
@@ -38,7 +38,7 @@ Pas de manifeste, lockfile, CI, linter ni suite de tests. Les scripts et message
 - Changer `--chunk-size` invalide les scans/index existants ; changer la taille des QR impose de réimprimer.
 - Le pipeline suppose ≤676 morceaux (suffixes `aa`…`zz`, glob `morceau_??`) ; au-delà, adapter `split -a` et les globs.
 - L'index ne contient pas de mots de passe, mais noms/URL/identifiants restent sensibles. Permissions attendues : scripts 700, fichiers 600.
-- `LISEZMOI.md` est la doc utilisateur ; le `LISEZMOI.txt` de chaque sauvegarde est généré par un heredoc dans `creer_sauvegarde_qr.sh`. Mettre les deux à jour si le flux change.
+- `README.md` est la doc utilisateur ; le `LISEZMOI.txt` de chaque sauvegarde est généré par un heredoc dans `creer_sauvegarde_qr.sh`. Mettre les deux à jour si le flux change.
 
 ## Vérification d'un changement
 

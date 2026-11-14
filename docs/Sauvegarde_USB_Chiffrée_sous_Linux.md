@@ -406,7 +406,7 @@ L'architecture retenue résout simultanément les contradictions habituelles du 
 > 1. creer\_sauvegarde\_qr.sh  
 > 2. generer\_index\_qr.py  
 > 3. generer\_planches\_qr.py  
-> 4. LISEZMOI.md  
+> 4. README.md  
 > 5. Does knowing how an encrypted file changed make it vulnerable?, [https\://security.stackexchange.com/questions/262994/does-knowing-how-an-encrypted-file-changed-make-it-vulnerable](https://security.stackexchange.com/questions/262994/does-knowing-how-an-encrypted-file-changed-make-it-vulnerable)  
 > 6. Digital Fortification: A Deep Dive into Cryptomator \- ResearchGate, [https\://www\.researchgate.net/publication/412294737\_Digital\_Fortification\_A\_Deep\_Dive\_into\_Cryptomator](https://www.researchgate.net/publication/412294737_Digital_Fortification_A_Deep_Dive_into_Cryptomator)  
 > 7. Comparison with Other Projects \- gocryptfs \- nuetzlich.net, [https\://nuetzlich.net/gocryptfs/comparison/](https://nuetzlich.net/gocryptfs/comparison/)  

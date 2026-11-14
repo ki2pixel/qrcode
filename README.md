@@ -354,7 +354,7 @@ réparer, puis relance la consultation.
 
 La partition `URGENCE_QR` est lisible sans LUKS sur Windows, macOS ou Linux.
 Elle contient la capsule, les `.par2`, le manifeste SHA-256, l’en-tête LUKS
-chiffré et ce `LISEZMOI.md`.
+chiffré et ce `README.md`.
 
 Vérifier et réparer la capsule, depuis la partition `URGENCE_QR` :
 

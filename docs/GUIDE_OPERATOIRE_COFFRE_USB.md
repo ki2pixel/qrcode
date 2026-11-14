@@ -13,7 +13,7 @@ La clé USB est organisée en deux partitions distinctes :
    * Contient la capsule autonome de secours `tar.zst.age` et ses blocs de réparation Reed-Solomon `par2` (15 % de redondance).
 2. **Partition 2 (`URGENCE_QR` - 255 Mo, exFAT lisible partout) :**
    * Lisible nativement sous Linux, macOS et Windows sans nécessiter LUKS.
-   * Contient la capsule de secours chiffrée, les fichiers de réparation `.par2`, le fichier `LISEZMOI.md` et l'en-tête LUKS2 chiffré (`luks_header_qr.bak.age`).
+   * Contient la capsule de secours chiffrée, les fichiers de réparation `.par2`, le fichier `README.md` et l'en-tête LUKS2 chiffré (`luks_header_qr.bak.age`).
 
 ---
 
