@@ -21,6 +21,13 @@ consultation en lecture seule.
 ./creer_sauvegarde_qr.sh export.csv [dossier_sortie]
 ```
 
+Pour sauter la génération des planches PDF tout en conservant les QR, les
+index CSV/JSON et les autres sorties :
+
+```bash
+SANS_PLANCHES=1 ./creer_sauvegarde_qr.sh export.csv
+```
+
 Formats source pris en charge : exports **Bitwarden** (`name`, `folder`,
 `login_uri`, `login_username`) et **KeePassXC** (`Title`, `Group`, `URL`,
 `Username`), ainsi que les colonnes génériques équivalentes.
@@ -119,8 +126,13 @@ Depuis la racine du dossier de sauvegarde :
 
 ```bash
 python3 scripts/extraire_entree.py R123 --scans ./scans
+python3 scripts/extraire_entree.py --id R123 --scans ./scans
 python3 scripts/extraire_entree.py --nom example.com --scans ./scans
 ```
+
+L’identifiant peut être passé directement ou avec `--id`. `--nom` cherche dans
+le nom de l’entrée (colonne `name` ou `Title`), pas dans l’URL ni dans
+l’identifiant.
 
 Le script détecte automatiquement `csv/`, `json/` et `scans/`, que tu le lances
 depuis la racine ou depuis `scripts/`.
@@ -129,9 +141,11 @@ Il reconnaît les colonnes Bitwarden et KeePassXC (`name`/`Title`,
 `folder`/`Group`, `login_uri`/`URL`, `login_username`/`Username`). Une
 recherche `--nom` normalise les espaces insécables.
 
-Le script utilise l’export JSON global `scans/binary_eye_all_qr.json`. Il
-reconnaît les morceaux par leur en-tête `LQR1` et gère les encodages
-UTF-8/Latin-1/CP1252 de Binary Eye.
+Le script utilise l’export JSON global `scans/binary_eye_all_qr.json`. S’il
+est absent, il tente les fichiers individuels (morceaux bruts ou exports
+texte) ; `--individuels` force ce mode de secours. Il reconnaît les morceaux
+par leur en-tête `LQR1` et gère les encodages UTF-8/Latin-1/CP1252 de
+Binary Eye.
 
 Il gère automatiquement :
 
@@ -143,7 +157,7 @@ Il gère automatiquement :
 
 ### Format d’export Binary Eye
 
-Le seul format utilisé est l’export **JSON** global de Binary Eye, déposé dans
+Le format nominal est l’export **JSON** global de Binary Eye, déposé dans
 `scans/binary_eye_all_qr.json`. Les exports CSV et TXT ne sont pas conservés :
 le CSV remplace les sauts de ligne du QR par des espaces, et le TXT normalise
 certains espaces.
@@ -156,9 +170,21 @@ etc.) et refuse de les utiliser : une traduction remplace les en-têtes anglais
 (`folder`, `login`…) et casse les octets. Réexporte-les avec Binary Eye, sans
 traduction.
 
-Le résultat est écrit dans `entree_R123.csv`, avec l’en-tête CSV. Le mot de passe
-n’est pas affiché par défaut ; ajoute `--afficher` si tu veux le voir dans le
-terminal.
+Le résultat est écrit dans `entree_<record_id>.csv` (par exemple
+`entree_R123.csv`), avec l’en-tête CSV. Le mot de passe n’est pas affiché par
+défaut ; ajoute `--afficher` si tu veux le voir dans le terminal.
+
+Options de secours et options avancées :
+
+- `--export FICHIER` impose un export JSON précis au lieu de
+  `scans/binary_eye_all_qr.json` ;
+- `--individuels` ignore l’export global et lit les fichiers individuels
+  (morceaux bruts ou exports texte) ;
+- `--sortie FICHIER` choisit le CSV de sortie (défaut :
+  `entree_<record_id>.csv`, avec des suffixes `_1`, `_2` si plusieurs lignes
+  partagent le même identifiant) ;
+- `--index`, `--morceaux` et `--meta` forcent les chemins des index
+  (détection automatique par défaut).
 
 ## 3. Restauration complète
 
@@ -170,7 +196,8 @@ python3 scripts/restaurer_sauvegarde.py --scans ./scans
 
 Le script :
 
-- utilise `scans/binary_eye_all_qr.json` s’il est présent ;
+- utilise `scans/binary_eye_all_qr.json` s’il est présent, sinon les fichiers
+  individuels (ou `--individuels` pour les forcer) ;
 - reconnaît les morceaux par leur en-tête `LQR1` ;
 - essaie les encodages UTF-8 et Latin-1/CP1252 de Binary Eye ;
 - calcule d’abord le SHA-256 sur les octets bruts concaténés, avant toute
@@ -179,6 +206,10 @@ Le script :
 - essaie les fins de ligne CRLF et LF ;
 - compare le SHA-256 exact et le SHA-256 sans NBSP à ceux de
   `json/index_meta.json`.
+
+Options de secours : `--export FICHIER` impose un export JSON précis,
+`--individuels` ignore l’export global, `--sortie FICHIER` choisit le CSV
+restauré et `--morceaux` / `--meta` forcent les chemins des index.
 
 Il écrit `restauration.csv` et doit afficher :
 
@@ -217,7 +248,7 @@ sudo add-apt-repository -y universe
 sudo apt update
 sudo apt install -y \
   cryptsetup-bin age zstd par2 rsync qrencode python3 \
-  parted exfatprogs e2fsprogs util-linux coreutils findutils tar udev \
+  parted exfatprogs e2fsprogs util-linux coreutils findutils diffutils tar udev \
   cups cups-client weasyprint fonts-dejavu-core
 ```
 
@@ -226,7 +257,7 @@ Fedora :
 ```bash
 sudo dnf install -y \
   cryptsetup age zstd par2cmdline rsync qrencode python3 \
-  parted exfatprogs e2fsprogs util-linux coreutils findutils tar \
+  parted exfatprogs e2fsprogs util-linux coreutils findutils diffutils tar \
   cups cups-client cups-filters weasyprint dejavu-sans-fonts
 ```
 
@@ -235,7 +266,7 @@ Arch Linux :
 ```bash
 sudo pacman -S --needed \
   cryptsetup age zstd par2cmdline rsync qrencode python \
-  parted exfatprogs e2fsprogs util-linux coreutils findutils tar \
+  parted exfatprogs e2fsprogs util-linux coreutils findutils diffutils tar \
   cups cups-filters python-weasyprint ttf-dejavu
 ```
 
@@ -246,9 +277,11 @@ sudo ./init_usb_coffre.sh /dev/sdX
 ```
 
 Le script vérifie que le périphérique est bien USB/amovible, qu’il ne contient
-pas le système en cours, et affiche son modèle, sa taille et son numéro de
-série. Il faut taper `EFFACER` puis le numéro de série exact : **toutes les
-données de la clé sont détruites**.
+pas le système en cours, qu’aucune de ses partitions n’est montée et qu’il
+offre au moins 1 Gio. Il affiche son modèle, sa taille et son numéro de
+série. Il faut taper `EFFACER` puis le numéro de série exact (ou le nom du
+périphérique si le numéro de série est indisponible) : **toutes les données
+de la clé sont détruites**.
 
 Pour les tests sur image loopback uniquement, ajoute
 `--allow-loopback`. Le drapeau n’autorise que les périphériques de type
@@ -262,7 +295,9 @@ noyaux ≥ 6.4), jamais dans `/dev/shm` partagé avec les autres utilisateurs.
 Il crée ensuite :
 
 - une partition GPT `COFFRE_LUKS` en LUKS2 (AES-XTS 512 bits, Argon2id,
-  2 Gio de mémoire par défaut, 4 threads, secteurs de 4096 octets) ;
+  2 Gio de mémoire par défaut — ramené automatiquement à 1 Gio ou 512 Mio
+  si la RAM disponible est insuffisante et si l’option n’est pas fournie —,
+  4 threads, secteurs de 4096 octets) ;
 - un système ext4 `QR_DATA` sans espace réservé root, monté en `0700`, avec
   `.nomedia` et `.trackerignore` ;
 - une partition `URGENCE_QR` de 256 Mio en exFAT ;
@@ -276,10 +311,36 @@ sudo ./init_usb_coffre.sh --argon2-mib 4096 /dev/sdX
 sudo ./init_usb_coffre.sh --argon2-mib 1024 --argon2-threads 2 /dev/sdX
 ```
 
+`--argon2-mib` accepte 256 à 8192 MiB et `--argon2-threads` 1 à 32. Sans
+`--argon2-mib`, la valeur de 2048 MiB est ramenée à 512 MiB si moins de
+2 Gio sont disponibles, ou à 1024 MiB si moins de 3 Gio le sont.
+
+Le script refuse de démarrer si `~/luks_header_qr.bak.age` existe déjà :
+déplace l’ancienne sauvegarde avant de réinitialiser le disque. Le chemin est
+résolu dans le répertoire personnel de l’utilisateur `sudo` via `getent`, et
+non via la variable `HOME`.
+
 Conserve `luks_header_qr.bak.age` **hors de la clé**, avec une phrase de passe
 distincte de celle du coffre. Refais cette sauvegarde après tout changement
 de phrase de passe ou de keyslot LUKS : restaurer un ancien en-tête annule les
-changements.
+changements. Ne relance pas `init_usb_coffre.sh` pour cela, car il est
+destructif. Extrais le nouvel en-tête dans un tmpfs dédié, puis chiffre-le :
+
+```bash
+sudo install -d -m 0700 /mnt/ram_hdr
+sudo mount -t tmpfs -o size=32M,mode=0700,uid="$(id -u)",gid="$(id -g)",nodev,nosuid,noexec,noswap tmpfs /mnt/ram_hdr
+sudo cryptsetup luksHeaderBackup /dev/sdX1 \
+  --header-backup-file /mnt/ram_hdr/header.bak
+sudo chown "$(id -u):$(id -g)" /mnt/ram_hdr/header.bak
+chmod 600 /mnt/ram_hdr/header.bak
+age -p -o ~/luks_header_qr.bak.age /mnt/ram_hdr/header.bak
+shred -u -z -n 3 /mnt/ram_hdr/header.bak
+sudo umount /mnt/ram_hdr
+sudo rmdir /mnt/ram_hdr
+```
+
+Sur un noyau antérieur à 6.4, retire `noswap` et désactive le swap avant
+l’opération.
 
 ### 5.3 Générer une sauvegarde en RAM
 
@@ -312,6 +373,15 @@ sudo ./executer_sauvegarde_ram.sh --ram-size 1G /dev/sdX
 sudo ./executer_sauvegarde_ram.sh --allow-loopback --no-print /dev/loopX export.csv
 ```
 
+`--device /dev/sdX` et `--csv export.csv` sont des alias explicites des deux
+arguments positionnels. `--ram-size` accepte une valeur entière en Mio ou Gio
+(défaut : `2G`, minimum : `256M`) ; le script refuse une taille supérieure à
+la RAM disponible. `--garder-source` ne préserve que le CSV externe : la copie
+de travail dans `/mnt/ram_sec` est toujours détruite après la génération.
+
+`SANS_PLANCHES=1` saute la génération des planches et évite l’exigence de
+WeasyPrint ; `--no-print` saute uniquement l’impression interactive.
+
 Si le CSV vient du disque, le script demande confirmation avant de tenter de
 le détruire ; `shred` n’est pas une garantie sur SSD/NVMe à cause du wear
 leveling. L’export direct dans l’enclave reste la seule méthode réellement
@@ -339,7 +409,7 @@ capsule, les `.par2`, le manifeste et l’en-tête chiffré sont copiés sur
 
 La partition d’urgence ne fait que 256 Mio : pour un très gros portefeuille,
 la capsule et ses 15 % de redondance peuvent ne pas tenir. Le script prévient
-et permet d’ignorer la copie d’urgence ; le coffre LUKS2 reste complet.
+et ignore alors la copie d’urgence ; le coffre LUKS2 reste complet.
 Après vérification de la nouvelle copie, le script propose de supprimer par
 `shred` les anciennes capsules, leurs `.par2` et leurs manifestes. Sur une
 clé flash, `shred` ne garantit pas l’effacement physique des cellules ; il
@@ -359,13 +429,18 @@ temporairement le swap et les core dumps, monte une enclave RAM, ouvre LUKS2
 avec `cryptsetup open --readonly`, puis monte ext4 avec
 `-o ro,noatime,nodev,nosuid,noload`. Aucune écriture n’est faite sur la clé.
 
+`--ram-size` règle la taille du tmpfs (défaut : `512M`, minimum : `128M`) et
+`--device` est l’alias explicite du périphérique. `--id`, `--nom` et
+`--restaurer` sont incompatibles entre eux.
+
 Dépose l’export JSON global de Binary Eye dans :
 
 ```text
 /mnt/ram_sec/scans/binary_eye_all_qr.json
 ```
 
-ou utilise `--export /chemin/binary_eye_all_qr.json`. Les sorties sont écrites
+ou utilise `--export /chemin/binary_eye_all_qr.json` : le script le copie
+dans l’enclave et propose de détruire l’original. Les sorties sont écrites
 exclusivement dans `/mnt/ram_sec/sorties/`. Le script affiche leur nom et
 attend que tu appuies sur Entrée : **copie le fichier dont tu as besoin avant
 de continuer**, il sera effacé avec l’enclave. Si la restauration affiche
@@ -384,36 +459,45 @@ réparer, puis relance la consultation.
 ### 5.5 Récupération d’urgence
 
 La partition `URGENCE_QR` est lisible sans LUKS sur Windows, macOS ou Linux.
-Elle contient la capsule, les `.par2`, le manifeste SHA-256, l’en-tête LUKS
-chiffré et ce `README.md`.
+Après une sauvegarde complète, elle contient la capsule, les `.par2`, le
+manifeste SHA-256, l’en-tête LUKS chiffré et ce `README.md`. Les binaires
+`age`, `zstd`, `par2` et l’outil de vérification SHA-256 ne sont pas copiés
+sur la clé : garde-les disponibles hors ligne.
 
 Vérifier et réparer la capsule, depuis la partition `URGENCE_QR` :
 
 ```bash
-sha256sum -c sauvegarde_qr_<nom>.sha256
-par2 verify sauvegarde_qr_<nom>.tar.zst.age.par2
-par2 repair sauvegarde_qr_<nom>.tar.zst.age.par2
-sha256sum -c sauvegarde_qr_<nom>.sha256
+sha256sum -c sauvegarde_qr_<nom>_<date>.sha256
+par2 verify sauvegarde_qr_<nom>_<date>.tar.zst.age.par2
+par2 repair sauvegarde_qr_<nom>_<date>.tar.zst.age.par2
+sha256sum -c sauvegarde_qr_<nom>_<date>.sha256
 ```
 
 Déchiffrer et extraire la capsule sur un système disposant de `age`, `zstd`
 et `tar` :
 
 ```bash
-age -d sauvegarde_qr_<nom>.tar.zst.age | zstd -d | tar -xf -
+age -d sauvegarde_qr_<nom>_<date>.tar.zst.age | zstd -d | tar -xf -
 ```
 
-Restaurer l’en-tête LUKS2 si les premiers secteurs de la clé sont corrompus :
+Restaurer l’en-tête LUKS2 si les premiers secteurs de la clé sont corrompus.
+Utilise un tmpfs dédié, jamais `/dev/shm` partagé :
 
 ```bash
-age -d -o /dev/shm/luks_header_qr.bak ~/luks_header_qr.bak.age
+umask 077
+sudo install -d -m 0700 /mnt/ram_hdr
+sudo mount -t tmpfs -o size=32M,mode=0700,uid="$(id -u)",gid="$(id -g)",nodev,nosuid,noexec,noswap tmpfs /mnt/ram_hdr
+age -d -o /mnt/ram_hdr/luks_header_qr.bak ~/luks_header_qr.bak.age
 sudo cryptsetup luksHeaderRestore /dev/sdX1 \
-  --header-backup-file /dev/shm/luks_header_qr.bak
-shred -u -z -n 3 /dev/shm/luks_header_qr.bak
+  --header-backup-file /mnt/ram_hdr/luks_header_qr.bak
+shred -u -z -n 3 /mnt/ram_hdr/luks_header_qr.bak
+sudo umount /mnt/ram_hdr
+sudo rmdir /mnt/ram_hdr
 ```
 
-Cette opération écrase l’en-tête actuel : ne la fais que sur la bonne
-partition et après avoir vérifié la sauvegarde. Si la phrase de passe du
+Sur un noyau antérieur à 6.4, retire `noswap` et désactive le swap avant
+l’opération. Cette opération écrase l’en-tête actuel : ne la fais que sur la
+bonne partition et après avoir vérifié la sauvegarde. Si la phrase de passe du
 coffre a changé depuis la sauvegarde de l’en-tête, l’ancien en-tête restauré
 annule ce changement.
 

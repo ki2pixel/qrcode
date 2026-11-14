@@ -1,5 +1,14 @@
 # **Architecture de stockage à froid et hygiène cryptographique sous Linux pour la sauvegarde hors-ligne de portefeuilles de mots de passe par QR codes**
 
+> [!IMPORTANT]
+> **Note de périmètre.** Ce document est une analyse d'architecture et de
+> sécurité. Les commandes manuelles qu'il contient illustrent les mécanismes
+> et ne remplacent pas les scripts opérationnels : `init_usb_coffre.sh`,
+> `executer_sauvegarde_ram.sh` et `consulter_coffre_ro.sh` font autorité et
+> intègrent le durcissement complet (`swapoff`, `ulimit -c 0`, tmpfs dédié,
+> validation du périphérique, vérification SHA-256). Pour une opération
+> réelle, suivre `README.md` et `docs/GUIDE_OPERATOIRE_COFFRE_USB.md`.
+
 ## **Analyse des caractéristiques et vulnérabilités intrinsèques du pipeline de génération QR**
 
 L'examen technique du pipeline de sauvegarde (creer\_sauvegarde\_qr.sh et ses modules Python associés) révèle une architecture logicielle modulaire et déterministe, mais dont la mécanique opérationnelle engendre des contraintes sévères en matière d'hygiène cryptographique et de masquage des métadonnées1. Dès son initialisation, le script principal applique un masque de création restrictif umask 077 et segmente l'export CSV source en fichiers bruts de 500 octets exactement via l'utilitaire split \-b 500 dans le sous-répertoire morceaux/1. Pour chacun de ces segments (morceau\_aa, morceau\_ab, etc.), le pipeline construit un fichier temporaire .qrpayload préfixé par l'en-tête d'identification LQR1 \<suffixe\> \<n\>/\<total\>, génère une image PNG haute densité (qrencode \-s 16 \-d 600\) dans qrcodes/, puis supprime le fichier .qrpayload avec la commande standard rm \-f1. En aval de cette génération matricielle, deux scripts Python prennent le relais : generer\_index\_qr.py calcule les empreintes SHA-256 (exacte et normalisée sans espaces insécables U+00A0 pour pallier le comportement du lecteur Binary Eye) et produit les tables de correspondance dans csv/ et json/2, tandis que generer\_planches\_qr.py assemble les images PNG en trois documents HTML et trois fichiers PDF A4 (planches\_qr.pdf en grille 4×5, planches\_qr\_grand.pdf en grille 3×4, et test\_grand\_8qr.pdf) en s'appuyant sur le moteur de rendu WeasyPrint1. Enfin, l'arborescence produite est verrouillée par des permissions POSIX strictes, appliquant chmod 700 sur les répertoires ainsi que sur les scripts autonomes extraire\_entree.py et restaurer\_sauvegarde.py, chmod g-s sur les dossiers pour empêcher l'héritage de groupe, et chmod 600 sur l'ensemble des fichiers de données1.  
@@ -55,13 +64,13 @@ Toutefois, ni LUKS2 (en mode standard AES-XTS) ni VeraCrypt ne protègent les do
 ## **Recommandation architecturale tranchée**
 
 Pour ce workflow précis sous Linux, **l'architecture optimale est l'Option A (LUKS2 avec Argon2id durci \+ système de fichiers ext4) comme socle principal de la clé USB, enrichie par une stratégie de défense en profondeur intégrant une capsule immuable tar.zst.age \+ par2 (issue de l'Option B2)** ainsi qu'une minuscule partition d'amorçage exFAT de secours en fin de clé.  
-Ce choix architectural hybride surpasse toutes les autres options prises isolément. Dans l'usage nominal sous Linux, lorsque le volume LUKS2 \+ ext4 est déverrouillé en mode lecture seule (cryptsetup open \--readonly et mount \-o ro,noatime,nodev,nosuid), l'arborescence générée par creer\_sauvegarde\_qr.sh est immédiatement accessible avec ses permissions POSIX intactes (0700/0600)1. L'opérateur peut exécuter directement python3 scripts/extraire\_entree.py R123 \--scans /mnt/ram\_sec/scans \--sortie /mnt/ram\_sec/entree.csv1 ou consulter pdf/index\_qr.pdf à la volée, sans avoir à décompresser l'intégralité d'une archive en RAM et sans exposer la clé USB à la moindre écriture parasite. Sur le plan cryptographique, LUKS2 permet de paramétrer Argon2id bien au-delà de la limite de 1024 Mio et d'un seul thread imposée par VeraCrypt12, tout en masquant intégralement le nombre, les noms et la taille de 500 octets des morceaux CSV que gocryptfs et Cryptomator laissent fuiter1.  
+Ce choix architectural hybride surpasse toutes les autres options prises isolément. Dans l'usage nominal sous Linux, lorsque le volume LUKS2 \+ ext4 est déverrouillé en mode lecture seule (cryptsetup open \--readonly et mount \-o ro,noatime,nodev,nosuid,noload), l'arborescence générée par creer\_sauvegarde\_qr.sh est immédiatement accessible avec ses permissions POSIX intactes (0700/0600)1. L'opérateur peut exécuter directement python3 scripts/extraire\_entree.py R123 \--scans /mnt/ram\_sec/scans \--sortie /mnt/ram\_sec/entree.csv1 ou consulter pdf/index\_qr.pdf à la volée, sans avoir à décompresser l'intégralité d'une archive en RAM et sans exposer la clé USB à la moindre écriture parasite. Sur le plan cryptographique, LUKS2 permet de paramétrer Argon2id bien au-delà de la limite de 1024 Mio et d'un seul thread imposée par VeraCrypt12, tout en masquant intégralement le nombre, les noms et la taille de 500 octets des morceaux CSV que gocryptfs et Cryptomator laissent fuiter1.
 En stockant en parallèle au sein du volume LUKS2 une archive compressée, chiffrée et authentifiée du dossier (sauvegarde\_qr.tar.zst.age) accompagnée de ses blocs de réparation Reed-Solomon (par2 create \-r15), la sauvegarde acquiert une propriété que ni LUKS2 ni VeraCrypt ne possèdent seuls : la détection cryptographique du *bit rot* NAND et la capacité de reconstruire un fichier intact même si des cellules flash de la clé USB deviennent illisibles après dix ans dans un coffre. Enfin, l'ajout d'une petite partition exFAT de 256 Mio en fin de clé élimine toute dépendance à Linux en cas d'urgence matérielle : si le PC Linux tombe en panne, la clé USB peut être insérée dans n'importe quel ordinateur Windows ou macOS sans droits administrateur ni pilote noyau pour déchiffrer la capsule .tar.zst.age en mémoire.
 
 | Partition sur la clé USB | Taille allouée | Format & Chiffrement | Contenu stocké | Rôle opérationnel |
 | :---- | :---- | :---- | :---- | :---- |
-| **Partition 1 (COFFRE\_LUKS)** | \~98 % de la clé (ex. 63,7 Go sur 64 Go) | LUKS2 (Argon2id 2–4 Go RAM, AES-256-XTS) \+ ext411 | 1\. Dossier sauvegarde\_qr\_\<nom\>\_\<date\>/ complet (0700/0600)1 2\. Capsule sauvegarde\_qr.tar.zst.age \+ fichiers .par2 | **Usage nominal sous Linux** : montage en lecture seule (-o ro) pour consultation immédiate, impression ou exécution des scripts Python sans extraction globale. |
-| **Partition 2 (URGENCE\_QR)** | 256 Mio (en fin de clé) | exFAT standard (non chiffré au niveau bloc) | 1\. Copie de la capsule chiffrée sauvegarde\_qr.tar.zst.age \+ .par2 2\. En-tête luks\_header\_qr.bak.age chiffré24 3\. Binaires statiques autonomes age, zstd et par2 (Linux/Windows/macOS) | **Survie multi-OS à 10 ans** : déchiffrement immédiat sans pilote ni droits administrateur sur Windows/macOS en cas de panne du PC Linux, et restauration d'en-tête LUKS2. |
+| **Partition 1 (COFFRE\_LUKS)** | Tout l'espace moins 256 Mio (\~99 % de la clé) | LUKS2 (Argon2id 2 Gio RAM par défaut, ajustable de 256 à 8192 Mio, AES-256-XTS) \+ ext411 | 1\. Dossier sauvegarde\_qr\_\<nom\>\_\<date\>/ complet (0700/0600)1 2\. Capsule sauvegarde\_qr\_\<nom\>\_\<date\>.tar.zst.age \+ fichiers .par2 | **Usage nominal sous Linux** : montage en lecture seule (-o ro,noatime,nodev,nosuid,noload) pour consultation immédiate, impression ou exécution des scripts Python sans extraction globale. |
+| **Partition 2 (URGENCE\_QR)** | 256 Mio (en fin de clé) | exFAT standard (non chiffré au niveau bloc) | 1\. Copie de la capsule chiffrée sauvegarde\_qr\_\<nom\>\_\<date\>.tar.zst.age \+ .par2 2\. Manifeste SHA-256 et README.md 3\. En-tête luks\_header\_qr.bak.age chiffré24. Les binaires age, zstd et par2 ne sont pas copiés par les scripts : les prévoir hors ligne. | **Survie multi-OS à 10 ans** : déchiffrement immédiat sans pilote ni droits administrateur sur Windows/macOS en cas de panne du PC Linux, et restauration d'en-tête LUKS2. |
 
 ## **Hygiène cryptographique de bout en bout et élimination des traces sur SSD**
 
@@ -97,9 +106,13 @@ Au sein du terminal d'administration, l'enregistrement des commandes dans \~/.ba
 
 ### **Phase 1 : Préparation cryptographique de la clé USB et sauvegarde de l'en-tête LUKS2**
 
-Cette phase n'est exécutée qu'une seule fois pour initialiser la clé USB dédiée. Dans les commandes ci-dessous, /dev/sdX désigne la clé USB (à vérifier impérativement avec lsblk \-f avant exécution). La clé est partitionnée en GPT avec une partition principale LUKS2 \+ ext4 occupant tout l'espace moins 256 Mio, et une petite partition exFAT de secours de 256 Mio en fin de disque11.
+Cette phase n'est exécutée qu'une seule fois pour initialiser la clé USB dédiée. Dans les commandes ci-dessous, /dev/sdX désigne la clé USB (à vérifier impérativement avec lsblk \-f avant exécution). La clé est partitionnée en GPT avec une partition principale LUKS2 \+ ext4 occupant tout l'espace moins 256 Mio, et une petite partition exFAT de secours de 256 Mio en fin de disque11. Pour l'exécution réelle, préférer `init_usb_coffre.sh`, qui ajoute la validation du périphérique, `swapoff -a`, `ulimit -c 0` et un tmpfs dédié pour l'en-tête.
 
 Bash  
+\# 0\. Neutraliser le swap et les core dumps avant les allocations Argon2id
+ulimit \-c 0
+sudo swapoff \-a
+
 \# 1\. Désactiver l'historique du shell pour la session courante  
 unset HISTFILE  
 export HISTSIZE=0  
@@ -157,15 +170,19 @@ sudo cryptsetup close qr\_vault
 \# 8\. Formater la Partition 2 de secours en exFAT  
 sudo mkfs.exfat \-n "URGENCE\_QR" "\${USB\_DEV}2"
 
-\# 9\. Sauvegarder l'en-tête binaire LUKS2 (16 Mio) directement en RAM, puis le chiffrer avec age  
+\# 9\. Sauvegarder l'en-tête binaire LUKS2 (16 Mio) dans un tmpfs dédié (noswap sur noyau ≥ 6.4), puis le chiffrer avec age
+sudo install \-d \-m 0700 /run/luks\_header\_qr
+sudo mount \-t tmpfs \-o size=32M,mode=0700,uid="\$(id \-u)",gid="\$(id \-g)",nodev,nosuid,noexec,noswap tmpfs /run/luks\_header\_qr
 sudo cryptsetup luksHeaderBackup "\${USB\_DEV}1" \\  
-  \--header-backup-file /dev/shm/luks\_header\_qr.bak  
-sudo chown "\$(id \-u):\$(id \-g)" /dev/shm/luks\_header\_qr.bak  
-chmod 0600 /dev/shm/luks\_header\_qr.bak
+  \--header-backup-file /run/luks\_header\_qr/header.bak
+sudo chown "\$(id \-u):\$(id \-g)" /run/luks\_header\_qr/header.bak
+chmod 0600 /run/luks\_header\_qr/header.bak
 
 \# Chiffrer la sauvegarde d'en-tête avec age (phrase de passe dédiée ou identique)  
-age \-p \-o \~/luks\_header\_qr.bak.age /dev/shm/luks\_header\_qr.bak  
-shred \-u \-z \-n 3 /dev/shm/luks\_header\_qr.bak
+age \-p \-o \~/luks\_header\_qr.bak.age /run/luks\_header\_qr/header.bak
+shred \-u \-z \-n 3 /run/luks\_header\_qr/header.bak
+sudo umount /run/luks\_header\_qr
+sudo rmdir /run/luks\_header\_qr
 
 La commande cryptsetup luksHeaderBackup extrait une image binaire exacte de 16 Mio contenant les deux en-têtes JSON et la zone de clés LUKS211. Son chiffrement immédiat en RAM via age \-p permet d'en conserver une copie sur le disque local, sur un second support physique et sur la partition URGENCE\_QR sans affaiblir la sécurité du volume24.
 
@@ -181,10 +198,10 @@ sudo swapoff \-a
 \# Vérifier qu'aucun périphérique de swap sur SSD n'est actif  
 swapon \--show
 
-\# 2\. Créer et monter l'enclave RAM dédiée (1 Gio alloué, accessible uniquement à l'utilisateur)  
+\# 2\. Créer et monter l'enclave RAM dédiée (2 Gio par défaut, accessible uniquement à l'utilisateur)
 \# Si le noyau Linux est \>= 6.4, ajouter l'option ",noswap" après "nosuid"  
 sudo mkdir \-p /mnt/ram\_sec  
-sudo mount \-t tmpfs \-o size=1G,mode=0700,uid="\$(id \-u)",gid="\$(id \-g)",nodev,nosuid tmpfs /mnt/ram\_sec
+sudo mount \-t tmpfs \-o size=2G,mode=0700,uid="\$(id \-u)",gid="\$(id \-g)",nodev,nosuid,noexec tmpfs /mnt/ram\_sec
 
 \# 3\. Créer l'arborescence de confinement des fichiers temporaires et caches en RAM  
 mkdir \-p /mnt/ram\_sec/{tmp,cache,data,home\_sandbox,travail}  
@@ -226,7 +243,7 @@ HOME="/mnt/ram\_sec/home\_sandbox" \\
 
 \# 10\. Isoler le spouleur d'impression CUPS en RAM (/var/spool/cups) avant d'imprimer  
 sudo systemctl stop cups.socket cups.service  
-sudo mount \-t tmpfs \-o size=512M,mode=0710,uid=root,gid=lp,nodev,nosuid tmpfs /var/spool/cups  
+sudo mount \-t tmpfs \-o size=512M,mode=0710,uid=root,gid=lp,nodev,nosuid,noexec tmpfs /var/spool/cups
 sudo install \-d \-m 1770 \-o root \-g lp /var/spool/cups/tmp  
 sudo install \-d \-m 0770 \-o root \-g lp /var/spool/cups/cache  
 sudo systemctl start cups.service
@@ -247,7 +264,7 @@ sudo systemctl stop cups.socket cups.service
 sudo umount /var/spool/cups  
 sudo systemctl start cups.socket cups.service
 
-L'encapsulation temporaire de /var/spool/cups dans un montage tmpfs (étapes 10 à 12\) garantit que les fichiers de travail dXXXXX-001 créés par cupsd42 disparaissent physiquement dès le umount, sans jamais avoir été inscrits sur le SSD.
+L'encapsulation temporaire de /var/spool/cups dans un montage tmpfs (étapes 10 à 12\) garantit que les fichiers de travail dXXXXX-001 créés par cupsd42 disparaissent physiquement dès le umount, sans jamais avoir été inscrits sur le SSD. Le script `executer_sauvegarde_ram.sh` isole en outre /var/cache/cups et /var/log/cups, arrête cups.path et cups-browsed, puis écrase le spoule par shred avant le démontage.
 
 ### **Phase 3 : Création de la capsule de survie AEAD et transfert vers la clé USB**
 
@@ -335,8 +352,9 @@ Pour extraire une entrée spécifique avec extraire\_entree.py8 ou vérifier une
 
 Bash  
 \# 1\. Monter une enclave RAM éphémère pour recevoir les scans et la sortie déchiffrée  
+\# Ajouter ",noswap" sur noyau ≥ 6.4 ; le swap doit être désactivé par ailleurs.
 sudo mkdir \-p /mnt/ram\_sec  
-sudo mount \-t tmpfs \-o size=256M,mode=0700,uid="\$(id \-u)",gid="\$(id \-g)",nodev,nosuid tmpfs /mnt/ram\_sec  
+sudo mount \-t tmpfs \-o size=256M,mode=0700,uid="\$(id \-u)",gid="\$(id \-g)",nodev,nosuid,noexec tmpfs /mnt/ram\_sec
 mkdir \-p /mnt/ram\_sec/scans  
 export PYTHONDONTWRITEBYTECODE=1
 
@@ -344,7 +362,7 @@ export PYTHONDONTWRITEBYTECODE=1
 USB\_DEV="/dev/sdX"  
 sudo cryptsetup open \--readonly "\${USB\_DEV}1" qr\_vault\_ro  
 sudo mkdir \-p /mnt/usb\_vault  
-sudo mount \-o ro,noatime,nodev,nosuid /dev/mapper/qr\_vault\_ro /mnt/usb\_vault
+sudo mount \-o ro,noatime,nodev,nosuid,noload /dev/mapper/qr\_vault\_ro /mnt/usb\_vault
 
 \# 3\. Déposer l'export JSON de Binary Eye dans /mnt/ram\_sec/scans/binary\_eye\_all\_qr.json  
 \# puis lancer l'extraction ciblée (ex. entrée R123 ou recherche par nom) SANS écrire sur la clé ni le SSD :  
@@ -371,7 +389,7 @@ sudo umount /mnt/ram\_sec
 sudo umount /mnt/usb\_vault  
 sudo cryptsetup close qr\_vault\_ro
 
-Grâce aux options explicites \--scans, \--index, \--morceaux, \--meta et \--sortie supportées par extraire\_entree.py et restaurer\_sauvegarde.py8, les scripts lisent les index directement depuis la partition LUKS2 verrouillée en lecture seule et écrivent le résultat exclusivement dans /mnt/ram\_sec/.
+Grâce aux options explicites \--scans, \--morceaux, \--meta et \--sortie supportées par extraire\_entree.py et restaurer\_sauvegarde.py8 (auxquelles s'ajoute \--index pour l'extraction ciblée), les scripts lisent les index directement depuis la partition LUKS2 verrouillée en lecture seule et écrivent le résultat exclusivement dans /mnt/ram\_sec/.
 
 #### **Scénario 2 : Réparation d'un en-tête LUKS2 corrompu ou de cellules NAND dégradées (Bit Rot)**
 
@@ -379,9 +397,15 @@ Si la clé USB subit une corruption de ses premiers secteurs empêchant l'ouvert
 
 Bash  
 \# Cas A : Restauration de l'en-tête LUKS2 depuis la sauvegarde chiffrée age  
-age \-d \-o /dev/shm/luks\_header\_qr.bak \~/luks\_header\_qr.bak.age  
-sudo cryptsetup luksHeaderRestore /dev/sdX1 \--header-backup-file /dev/shm/luks\_header\_qr.bak  
-shred \-u \-z \-n 1 /dev/shm/luks\_header\_qr.bak
+\# Déchiffrer dans un tmpfs dédié (noswap sur noyau ≥ 6.4), jamais dans /dev/shm
+umask 077
+sudo install \-d \-m 0700 /mnt/ram\_hdr
+sudo mount \-t tmpfs \-o size=32M,mode=0700,uid="\$(id \-u)",gid="\$(id \-g)",nodev,nosuid,noexec,noswap tmpfs /mnt/ram\_hdr
+age \-d \-o /mnt/ram\_hdr/luks\_header\_qr.bak \~/luks\_header\_qr.bak.age
+sudo cryptsetup luksHeaderRestore /dev/sdX1 \--header-backup-file /mnt/ram\_hdr/luks\_header\_qr.bak
+shred \-u \-z \-n 1 /mnt/ram\_hdr/luks\_header\_qr.bak
+sudo umount /mnt/ram\_hdr
+sudo rmdir /mnt/ram\_hdr
 
 \# Cas B : Vérification et réparation Reed-Solomon (par2) de la capsule .tar.zst.age  
 \# (Depuis la partition LUKS2 ou depuis la partition exFAT de secours)  
@@ -399,7 +423,7 @@ age \-d sauvegarde\_qr\_coffre\_YYYYMMDD\_HHMMSS.tar.zst.age \| zstd \-d \| tar 
 
 ## **Synthèse des garanties de sécurité opérationnelle**
 
-L'architecture retenue résout simultanément les contradictions habituelles du stockage à froid sur mémoire Flash. En utilisant **LUKS2 (Argon2id 2–4 Go RAM \+ AES-256-XTS) couplé à ext4** comme conteneur primaire11, l'opérateur bénéficie de l'intégration native au noyau Linux, de la préservation stricte des permissions 0700/0600 imposées par creer\_sauvegarde\_qr.sh1, d'un masquage intégral des métadonnées (interdisant toute déduction du nombre ou de la taille des morceaux de 500 octets) et d'une consultation instantanée en lecture seule (-o ro). En adossant à ce volume une **capsule immuable .tar.zst.age protégée par code correcteur par2**, le système élimine le risque de corruption silencieuse de la mémoire NAND sur une décennie et garantit un déchiffrement d'urgence sans pilote sur n'importe quel système d'exploitation tiers. Enfin, le confinement intégral de l'exécution, des variables $TMPDIR/$XDG\_CACHE\_HOME et du spouleur /var/spool/cups dans des montages tmpfs en mémoire vive (avec Swap et Core Dumps désactivés) garantit mathématiquement qu'aucun artefact en clair ne traverse jamais le contrôleur NVMe de la machine hôte15.
+L'architecture retenue résout simultanément les contradictions habituelles du stockage à froid sur mémoire Flash. En utilisant **LUKS2 (Argon2id 2 Gio RAM par défaut, ajustable de 256 à 8192 Mio, \+ AES-256-XTS) couplé à ext4** comme conteneur primaire11, l'opérateur bénéficie de l'intégration native au noyau Linux, de la préservation stricte des permissions 0700/0600 imposées par creer\_sauvegarde\_qr.sh1, d'un masquage intégral des métadonnées (interdisant toute déduction du nombre ou de la taille des morceaux de 500 octets) et d'une consultation instantanée en lecture seule (-o ro). En adossant à ce volume une **capsule immuable .tar.zst.age protégée par code correcteur par2**, le système élimine le risque de corruption silencieuse de la mémoire NAND sur une décennie et garantit un déchiffrement d'urgence sans pilote sur n'importe quel système d'exploitation tiers. Enfin, le confinement intégral de l'exécution, des variables $TMPDIR/$XDG\_CACHE\_HOME et du spouleur /var/spool/cups dans des montages tmpfs en mémoire vive (avec Swap et Core Dumps désactivés) garantit mathématiquement qu'aucun artefact en clair ne traverse jamais le contrôleur NVMe de la machine hôte15.
 
 #### **Sources des citations**
 

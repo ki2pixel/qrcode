@@ -8,12 +8,13 @@ Ce guide résume la procédure exacte pour exploiter, mettre à jour et consulte
 
 La clé USB est organisée en deux partitions distinctes :
 1. **Partition 1 (`COFFRE_LUKS` - ~99 % de la clé, ext4 hermétique 0700) :**
-   * Chiffrement LUKS2 durci (Argon2id 2 Gio RAM, 4 threads, AES-XTS 512 bits).
+   * Chiffrement LUKS2 durci (Argon2id 2 Gio RAM par défaut, ajusté à 1 Gio ou 512 Mio si la RAM disponible est insuffisante, 4 threads, AES-XTS 512 bits).
    * Contient les sauvegardes horodatées complètes (dossiers de QR codes, PDF pour impression, index CSV/HTML).
-   * Contient la capsule autonome de secours `tar.zst.age` et ses blocs de réparation Reed-Solomon `par2` (15 % de redondance).
+   * Contient la capsule autonome de secours `sauvegarde_qr_<nom>_<date>.tar.zst.age` et ses blocs de réparation Reed-Solomon `par2` (15 % de redondance).
 2. **Partition 2 (`URGENCE_QR` - 256 MiB, exFAT lisible partout) :**
    * Lisible nativement sous Linux, macOS et Windows sans nécessiter LUKS.
-   * Contient la capsule de secours chiffrée, les fichiers de réparation `.par2`, le fichier `README.md` et l'en-tête LUKS2 chiffré (`luks_header_qr.bak.age`).
+   * Après une sauvegarde complète, contient la capsule de secours chiffrée, les fichiers de réparation `.par2`, le manifeste SHA-256, le fichier `README.md` et l'en-tête LUKS2 chiffré (`luks_header_qr.bak.age`).
+   * Ne contient pas les binaires `age`, `zstd` ou `par2` : prévoyez-les hors ligne pour la récupération.
 
 ---
 
@@ -34,11 +35,17 @@ Sous Linux, la lettre attribuée à une clé USB (`sde`, `sdf`, etc.) n'est **ja
    ```
    *(En remplaçant `sdX2` par votre lettre réelle, par ex. `sdf2`).*
 
+3. Pour une initialisation, vérifiez aussi que la clé offre au moins 1 Gio,
+   qu'aucune de ses partitions n'est montée et que
+   `~/luks_header_qr.bak.age` n'existe pas déjà. Le script refuse de démarrer
+   dans ces cas ; déplacez l'ancienne sauvegarde d'en-tête avant de
+   réinitialiser le disque.
+
 ---
 
 ## 1. Faire une nouvelle sauvegarde (Procédure périodique)
 
-Cette procédure génère l'ensemble des QR codes et PDF en mémoire vive (RAM isolée `noswap`), coupe le swap système temporairement pour qu'aucun mot de passe ne fuite sur SSD, puis synchronise le coffre USB.
+Cette procédure génère l'ensemble des QR codes et PDF en mémoire vive (RAM isolée `noswap` sur noyau ≥ 6.4, swap désactivé sinon), coupe le swap système temporairement pour qu'aucun mot de passe ne fuite sur SSD, puis synchronise le coffre USB.
 
 ### Étape 1 : Identifier et démonter `URGENCE_QR`
 Si votre clé est reconnue en `/dev/sdf` :
@@ -78,7 +85,10 @@ Bitwarden sont acceptés.
 3. **Phrase LUKS2 :** Saisissez la phrase de passe de votre coffre USB pour permettre le montage et la copie.
 4. Le script synchronise les fichiers, vérifie les empreintes SHA-256, nettoie la RAM par `shred`, réactive le swap système et referme le coffre.
 5. Après vérification de la nouvelle capsule, le script propose de supprimer les anciennes capsules de `URGENCE_QR` par `shred` (les cellules flash ne peuvent toutefois pas être garanties effacées physiquement).
-6. Vous pouvez retirer la clé USB en toute sécurité.
+6. Vous pouvez retirer la clé USB en toute sécurité. Le script démonte et
+   referme le coffre mais ne coupe pas l'alimentation du périphérique ; si
+   votre distribution le permet, utilisez `udisksctl power-off -b /dev/sdX`
+   après la fermeture.
 
 ---
 
@@ -100,16 +110,21 @@ sudo ./consulter_coffre_ro.sh /dev/sdX
 ```
 
 Pour un test sur image loopback uniquement, ajoutez `--allow-loopback` et
-utilisez un `HOME` temporaire : `init_usb_coffre.sh` écrit son en-tête age
-dans le répertoire personnel de l'utilisateur `sudo`. Ne testez jamais
-`init_usb_coffre.sh` sur un disque physique sans confirmation explicite.
+utilisez un utilisateur de test doté d'un répertoire personnel isolé : les
+scripts résolvent `REAL_HOME` via `getent passwd "$SUDO_USER"` et ignorent la
+variable `HOME`. À défaut, déplacez temporairement `~/luks_header_qr.bak.age`
+avant le test. Ne testez jamais `init_usb_coffre.sh` sur un disque physique
+sans confirmation explicite.
 
 ### Étape 3 : Déverrouillage et scans
-1. Saisissez votre phrase de passe LUKS2. Le coffre est monté en **lecture seule stricte** (`mount -o ro,noload`).
+1. Saisissez votre phrase de passe LUKS2. Le coffre est monté en **lecture seule stricte** (`mount -o ro,noatime,nodev,nosuid,noload`).
 2. Déposez l'export JSON de l'application mobile **Binary Eye** dans l'enclave :
    ```bash
    cp /chemin/vers/binary_eye_all_qr.json /mnt/ram_sec/scans/binary_eye_all_qr.json
    ```
+   Vous pouvez aussi lancer le script avec
+   `--export /chemin/vers/binary_eye_all_qr.json` pour qu'il copie lui-même
+   l'export dans l'enclave ; il propose ensuite de détruire l'original.
 3. Appuyez sur **Entrée**.
 4. Choisissez dans le menu interactif :
    * `1` : Extraire par identifiant (ex. `R042`)
@@ -159,35 +174,47 @@ Si votre machine habituelle n'est plus accessible ou si le premier secteur de la
 
 ### A. Sur Windows ou macOS (via la partition `URGENCE_QR`)
 1. Insérez la clé USB. La partition `URGENCE_QR` monte automatiquement.
-2. Copiez les fichiers `sauvegarde_qr_*.tar.zst.age` et les fichiers `.par2`.
-3. Avec les utilitaires multiplateformes `par2` et `age` :
+2. Copiez la capsule `sauvegarde_qr_<nom>_<date>.tar.zst.age`, ses fichiers `.par2` et le manifeste `.sha256`.
+3. Vérifiez l'intégrité, puis réparez l'archive si des secteurs flash sont défectueux :
    ```bash
-   # Réparer l'archive si des secteurs flash sont défectueux
-   par2 r sauvegarde_qr_*.tar.zst.age.par2
-
-   # Déchiffrer et décompresser
-   age -d sauvegarde_qr_*.tar.zst.age | tar --zstd -xvf -
+   sha256sum -c sauvegarde_qr_<nom>_<date>.sha256
+   par2 verify sauvegarde_qr_<nom>_<date>.tar.zst.age.par2
+   par2 repair sauvegarde_qr_<nom>_<date>.tar.zst.age.par2
+   sha256sum -c sauvegarde_qr_<nom>_<date>.sha256
    ```
+4. Déchiffrez et décompressez avec `age`, `zstd` et `tar` :
+   ```bash
+   age -d sauvegarde_qr_<nom>_<date>.tar.zst.age | zstd -d | tar -xf -
+   ```
+   Les binaires `age`, `zstd` et `par2` ne sont pas copiés sur la partition
+   d'urgence : prévoyez-les hors ligne avant d'en avoir besoin. Sur macOS,
+   `shasum -a 256 -c` lit le même manifeste ; sur Windows, utilisez WSL,
+   Git Bash ou un outil équivalent.
 
 ### B. En cas d'en-tête LUKS2 endommagé sur Linux
-Si le début de la partition LUKS2 est corrompu, restaurez l'en-tête depuis la sauvegarde chiffrée :
+Si le début de la partition LUKS2 est corrompu, restaurez l'en-tête depuis la
+sauvegarde chiffrée. Déchiffrez-le dans un tmpfs dédié, jamais dans
+`/dev/shm` partagé :
 ```bash
-# Déchiffrer l'en-tête sauvegardé
-age -d -o /dev/shm/luks_header.bak ~/luks_header_qr.bak.age
-
-# Restaurer l'en-tête sur la partition 1
-sudo cryptsetup luksHeaderRestore /dev/sde1 --header-backup-file /dev/shm/luks_header.bak
-
-# Détruire immédiatement l'image temporaire en RAM
-shred -u -z -n 3 /dev/shm/luks_header.bak
+umask 077
+sudo install -d -m 0700 /mnt/ram_hdr
+sudo mount -t tmpfs -o size=32M,mode=0700,uid="$(id -u)",gid="$(id -g)",nodev,nosuid,noexec,noswap tmpfs /mnt/ram_hdr
+age -d -o /mnt/ram_hdr/luks_header.bak ~/luks_header_qr.bak.age
+sudo cryptsetup luksHeaderRestore /dev/sdX1 \
+  --header-backup-file /mnt/ram_hdr/luks_header.bak
+shred -u -z -n 3 /mnt/ram_hdr/luks_header.bak
+sudo umount /mnt/ram_hdr
+sudo rmdir /mnt/ram_hdr
 ```
+Sur un noyau antérieur à 6.4, retirez `noswap` et désactivez le swap avant
+l'opération.
 
 ---
 
 ## 4. Règles d'hygiène cryptographique
 
 * **Suppression du CSV source :** Exportez directement dans l'enclave RAM. Si un export en clair a déjà été écrit dans `~/Documents`, détruisez-le avec `shred -u -z -n 3 export.csv`, en sachant que `shred` ne garantit pas l'effacement physique sur SSD/NVMe. Ne conservez jamais l'export dans `~/Documents` comme emplacement de travail.
-* **Mise à jour de mot de passe :** Si vous modifiez la phrase de passe LUKS2 de la clé, vous **devez** régénérer la sauvegarde d'en-tête chiffrée (`luks_header_qr.bak.age`), sinon restaurer un ancien en-tête réactiverait l'ancienne phrase.
+* **Mise à jour de mot de passe :** Si vous modifiez la phrase de passe LUKS2 de la clé, vous **devez** régénérer la sauvegarde d'en-tête chiffrée (`luks_header_qr.bak.age`), sinon restaurer un ancien en-tête réactiverait l'ancienne phrase. Ne relancez pas `init_usb_coffre.sh` pour cela : il est destructif. Extrayez le nouvel en-tête avec `cryptsetup luksHeaderBackup` dans un tmpfs dédié, puis chiffrez-le avec `age -p`.
 
 ---
 

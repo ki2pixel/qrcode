@@ -1,3 +1,12 @@
+> [!IMPORTANT]
+> **Note de lecture — instantané d'audit.** Ce document conserve le diagnostic
+> établi avant la campagne de remédiation. Les constats `AUD-01` à `AUD-23`
+> décrivent l'état initial du code et non nécessairement son comportement
+> actuel : les correctifs de sécurité issus de cette campagne ont été appliqués
+> depuis (voir notamment le commit `5044e13`) et la documentation a été
+> harmonisée. Pour l'état courant, se référer au code, à `README.md` et à
+> `AGENTS.md`.
+
 ## 1. Synthèse exécutive
 
 L'architecture du dépôt `ki2pixel-qrcode` témoigne d'une conception réfléchie en matière de défense en profondeur : séparation des privilèges via `runuser`, utilisation de primitives cryptographiques modernes (LUKS2 avec AES-256-XTS et Argon2id, chiffrement authentifié `age` couplé à une redondance Reed-Solomon `par2` de 15 %), montage en lecture seule stricte (`--readonly` et `-o ro,noload`) lors des consultations, et prise en compte de particularités concrètes du lecteur mobile Binary Eye (normalisation des espaces insécables `U+00A0` et réencodages Latin-1/CP1252).
@@ -614,7 +623,12 @@ fi
 
 ---
 
-## 3. Bilan de cohérence code ↔ documentation
+## 3. Bilan de cohérence code ↔ documentation (état initial)
+
+> [!NOTE]
+> Ce tableau est conservé comme trace de l'écart initial. Les actions qu'il
+> recommande ont été traitées ou documentées ; il ne décrit pas l'état courant
+> du dépôt.
 
 | Sujet / Élément | Documentation (`AGENTS.md`, `README.md`, `docs/`) | Implémentation réelle dans le code | Impact et action requise |
 | --- | --- | --- | --- |
@@ -694,7 +708,7 @@ L'analyse statique complète de l'arbre syntaxique des modules Python (`generer_
 
 ### 4.3. Protocole de test complémentaire recommandé sur image loopback (`losetup`)
 
-Une fois le drapeau `--allow-loopback` ajouté (`AUD-18`), exécuter dans un environnement de test isolé la séquence suivante (avec un fichier image de $1,5\text{ Gio}$ en `/tmp`) pour valider bout en bout le partitionnement GPT, LUKS2, l'enclave RAM et la consultation en lecture seule sans toucher aux disques physiques :
+Le drapeau `--allow-loopback` étant désormais disponible, exécuter dans un environnement de test isolé la séquence suivante (avec un fichier image de $1,5\text{ Gio}$ en `/tmp`) pour valider bout en bout le partitionnement GPT, LUKS2, l'enclave RAM et la consultation en lecture seule sans toucher aux disques physiques :
 
 ```bash
 # 1. Création d'un disque virtuel de 1,5 Gio attaché en loopback

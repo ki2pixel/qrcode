@@ -204,9 +204,17 @@ Depuis la racine de ce dossier :
     python3 scripts/extraire_entree.py R123 --scans ./scans
     python3 scripts/extraire_entree.py --nom example.com --scans ./scans
 
+--nom cherche dans le nom de l'entrée (name/Title), pas dans l'URL.
+
 Le script utilise scans/binary_eye_all_qr.json.
 Les QR commencent par « LQR1 xx n/total » : le script retire cette ligne et
 retrouve chaque morceau.
+
+Options de secours : --export FICHIER impose un autre export JSON ;
+--sortie FICHIER choisit le CSV de sortie ; --individuels lit les fichiers
+individuels (morceaux bruts ou exports texte) au lieu de l'export global.
+Options avancées : --index, --morceaux et --meta forcent les chemins des
+index.
 
 Il n'affiche pas le mot de passe par défaut ; ajoute --afficher si tu veux le
 voir dans le terminal.
@@ -221,6 +229,9 @@ dans scans/binary_eye_all_qr.json :
 Le script reconstitue le CSV complet, vérifie le SHA-256 et écrit
 restauration.csv. Il doit afficher « Résultat : IDENTIQUE » avant de supprimer
 le CSV d'origine.
+
+Options de secours : --export FICHIER, --individuels, --sortie FICHIER,
+--morceaux FICHIER et --meta FICHIER.
 
 Binary Eye normalise les espaces insécables (U+00A0) en espaces simples dans
 ses exports. Le script affiche alors « IDENTIQUE APRÈS NORMALISATION NBSP » :

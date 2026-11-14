@@ -7,6 +7,7 @@ Les données traitées sont réelles et hautement sensibles : utiliser exclusive
 Pas de manifeste, lockfile, CI, linter ni suite de tests automatisés. Les scripts et messages sont en français ; conserver ce choix.
 Documentation utilisateur détaillée : `README.md`.
 Documentation coffre USB : `docs/GUIDE_OPERATOIRE_COFFRE_USB.md` et `docs/Sauvegarde_USB_Chiffrée_sous_Linux.md`.
+Audit cryptographique et d'intégrité : `docs/Audit-technique-cryptographique-et-dintegrite-complet.md` (diagnostic initial et statut des remédiations).
 
 ## Commandes
 
@@ -21,12 +22,16 @@ Documentation coffre USB : `docs/GUIDE_OPERATOIRE_COFFRE_USB.md` et `docs/Sauveg
   `python3 scripts/restaurer_sauvegarde.py --scans ./scans`
 - **Coffre USB — Initialisation du disque (DESTRUCTIF)** :
   `sudo ./init_usb_coffre.sh [--argon2-mib 2048] [--argon2-threads 4] [--allow-loopback] /dev/sdX`
-  Dépendances : `parted`, `cryptsetup`, `mkfs.ext4`, `mkfs.exfat` (`exfatprogs`), `age`.
+  `--argon2-mib` : 256–8192 MiB (défaut 2048, réduit à 1024 ou 512 MiB selon `MemAvailable`) ; `--argon2-threads` : 1–32. Périphérique ≥ 1 Gio, non monté.
+  Dépendances : `parted`, `cryptsetup`, `e2fsprogs` (`mkfs.ext4`), `exfatprogs` (`mkfs.exfat`), `age`, `util-linux` (`wipefs`, `blockdev`, `runuser`), `coreutils` (`shred`), `udev`.
 - **Coffre USB — Orchestration de sauvegarde en RAM hermétique** :
-  `sudo ./executer_sauvegarde_ram.sh [--no-print] [--allow-loopback] /dev/sdX [export.csv]`
-  Dépendances : `cryptsetup`, `age`, `par2` (`par2cmdline`), `zstd`, `qrencode`, `weasyprint`.
+  `sudo ./executer_sauvegarde_ram.sh [--device /dev/sdX] [--csv export.csv] [--ram-size 2G] [--no-print] [--garder-source] [--allow-loopback] /dev/sdX [export.csv]`
+  `--ram-size` : défaut `2G`, minimum `256M`, plafonné par `MemAvailable`. `--garder-source` ne préserve que le CSV externe ; la copie de travail en RAM est toujours détruite.
+  Dépendances : `cryptsetup`, `age`, `par2` (`par2cmdline`), `zstd`, `qrencode`, `weasyprint` (sauf `SANS_PLANCHES=1`), `rsync`, `diffutils`, `cups-client` (impression facultative), `systemd` (isolation CUPS).
 - **Coffre USB — Consultation ou restauration en lecture seule** :
-  `sudo ./consulter_coffre_ro.sh [--id R123 | --nom TEXTE | --restaurer] [--export scans.json] [--afficher] [--allow-loopback] /dev/sdX`
+  `sudo ./consulter_coffre_ro.sh [--device /dev/sdX] [--id R123 | --nom TEXTE | --restaurer] [--export scans.json] [--afficher] [--ram-size 512M] [--allow-loopback] /dev/sdX`
+  `--ram-size` : défaut `512M`, minimum `128M`. `--id`, `--nom` et `--restaurer` sont incompatibles.
+- **Lancement des scripts USB** : toujours via `sudo` depuis un compte non-root (`SUDO_USER`) ; `sudo -i` est refusé.
 - **Contrôle syntaxique** :
   `python3 -m py_compile *.py && bash -n *.sh`
 
@@ -42,29 +47,31 @@ Documentation coffre USB : `docs/GUIDE_OPERATOIRE_COFFRE_USB.md` et `docs/Sauveg
 
 ### 2. Coffre USB chiffré et enclave RAM
 - **Structure bi-partitionnée de la clé USB** :
-  - Partition 1 `COFFRE_LUKS` (~99 % de la clé) : conteneur LUKS2 durci (Argon2id 2048 Mio, 4 threads, AES-XTS 512 bits) formaté en ext4 (mode 0700). Contient les sauvegardes horodatées complètes et la capsule autonome.
-  - Partition 2 `URGENCE_QR` (256 MiB) : partition exFAT lisible sans outil sous Linux, macOS et Windows. Contient la capsule autonome `sauvegarde_qr_<nom>.tar.zst.age`, les fichiers de parité Reed-Solomon `sauvegarde_qr_<nom>.tar.zst.age.par2` (15 % de redondance), le manifeste SHA-256, la sauvegarde chiffrée de l'en-tête LUKS2 (`luks_header_qr.bak.age`) et `README.md`.
+  - Partition 1 `COFFRE_LUKS` (~99 % de la clé) : conteneur LUKS2 durci (Argon2id 2048 Mio par défaut, ajusté à 1024 ou 512 Mio si la RAM disponible est insuffisante, 4 threads, AES-XTS 512 bits) formaté en ext4 (mode 0700). Contient les sauvegardes horodatées complètes et la capsule autonome.
+  - Partition 2 `URGENCE_QR` (256 MiB) : partition exFAT lisible sans outil sous Linux, macOS et Windows. Contient la capsule autonome `sauvegarde_qr_<nom>_<date>.tar.zst.age`, les fichiers de parité Reed-Solomon `sauvegarde_qr_<nom>_<date>.tar.zst.age.par2` (15 % de redondance), le manifeste SHA-256, la sauvegarde chiffrée de l'en-tête LUKS2 (`luks_header_qr.bak.age`) et `README.md`. Les binaires `age`, `zstd` et `par2` n'y sont pas copiés : les prévoir hors ligne.
 - **Anti-rémanence stricte en mémoire vive (`init_usb_coffre.sh`, `executer_sauvegarde_ram.sh` / `consulter_coffre_ro.sh`)** :
   - Désactivation du Swap système (`swapoff -a`) et désactivation des core dumps (`ulimit -c 0`) pour les trois scripts, avec restauration du swap à la sortie.
-  - Montage d'un `tmpfs` dédié `/mnt/ram_sec` avec `-o noswap,nodev,nosuid,noexec,mode=0700`. `init_usb_coffre.sh` monte en plus un tmpfs dédié éphémère pour l'extraction de l'en-tête LUKS2 avant son chiffrement `age`.
+  - Montage d'un `tmpfs` dédié `/mnt/ram_sec` avec `-o noswap,nodev,nosuid,noexec,mode=0700` (`noswap` est ajouté sur noyau ≥ 6.4 ; le swap est désactivé globalement sinon). `init_usb_coffre.sh` monte en plus un tmpfs dédié éphémère pour l'extraction de l'en-tête LUKS2 avant son chiffrement `age`.
   - Redirection de tous les fichiers temporaires et caches (`TMPDIR`, `XDG_CACHE_HOME`, etc.) dans le tmpfs.
   - Toute la génération QR et la manipulation de secrets se fait exclusivement en RAM.
   - À la clôture, écrasement sécurisé par `shred` / démontage de l'enclave et réactivation du swap.
 - **Consultation en lecture seule (`consulter_coffre_ro.sh`)** :
-  - Déverrouille LUKS2 et monte la partition en lecture seule stricte (`mount -o ro,noload`).
+  - Déverrouille LUKS2 et monte la partition en lecture seule stricte (`mount -o ro,noatime,nodev,nosuid,noload`).
   - Déploie une enclave RAM pour importer les scans (`binary_eye_all_qr.json`), exécuter l'extraction ou la restauration, puis nettoie la RAM à la sortie sans jamais écrire sur la clé ni sur le SSD hôte.
 
 ## Pièges vérifiés
 
 - **DANGER PÉRIPHÉRIQUE /dev/sdX** : Ne JAMAIS exécuter `init_usb_coffre.sh` ou `executer_sauvegarde_ram.sh` sans vérifier formellement la lettre du disque cible (`lsblk -o NAME,MODEL,SIZE,TRAN,RM,FSTYPE`). `init_usb_coffre.sh` détruit irrémédiablement toutes les données du disque cible !
+- **Mémoire Argon2id** : `init_usb_coffre.sh` part de 2048 MiB mais réduit automatiquement à 512 MiB si `MemAvailable` est inférieur à 2 Gio, ou à 1024 MiB s'il est inférieur à 3 Gio, lorsque `--argon2-mib` n'est pas fourni. Les scripts de sauvegarde et de consultation vérifient aussi la RAM avant d'ouvrir le coffre.
+- **Sauvegarde d'en-tête existante** : `init_usb_coffre.sh` refuse de démarrer si `~/luks_header_qr.bak.age` existe. Déplacer l'ancienne sauvegarde avant toute réinitialisation. Le chemin est résolu via `getent passwd "$SUDO_USER"`, pas via la variable `HOME`.
 - **Auto-montage de la partition exFAT** : Sous les environnements de bureau (ex. GNOME / Ubuntu), `URGENCE_QR` (`/dev/sdX2`) est monté automatiquement à l'insertion. Toujours le démonter (`udisksctl unmount -b /dev/sdX2` ou `umount`) avant de lancer les scripts du coffre USB.
-- **Formats de portefeuille** : Bitwarden et KeePassXC sont supportés nativement. Les colonnes `Title`/`Group`/`URL`/`Username` de KeePassXC sont mappées vers les champs internes de l'index ; les exports `QUOTE_ALL` sont restaurés octet pour octet.
+- **Formats de portefeuille** : Bitwarden et KeePassXC sont supportés nativement. Les colonnes `Title`/`Group`/`URL`/`Username` de KeePassXC sont mappées vers les champs internes de l'index ; les exports `QUOTE_ALL` sont restaurés octet pour octet. La recherche `--nom` porte sur `name`/`Title`, pas sur l'URL.
 - **Export Binary Eye** : **JSON global uniquement**, `scans/binary_eye_all_qr.json`. Le CSV global aplatit les sauts de ligne des champs ; le TXT perd certains espaces de bord.
 - **Normalisation NBSP** : Binary Eye normalise les espaces insécables U+00A0 en espaces standards. `IDENTIQUE APRÈS NORMALISATION NBSP` est un succès ; `DIFFÉRENT` ne l'est pas. Le SHA sans NBSP est conservé dans `index_meta.json`.
 - **Encodage et Mojibake** : Le JSON peut contenir du Latin-1/CP1252 : les scripts essaient UTF-8, Latin-1 et CP1252. Ne pas réécrire les fichiers de scan à la main.
 - **Traductions automatiques** : Les scans traduits automatiquement (Google Lens, navigateurs) altèrent les identifiants et mots de passe et sont refusés : exporter directement depuis l'application de scan sans traduction.
 - **Affichage des secrets** : `extraire_entree.py` et `consulter_coffre_ro.sh` n'affichent pas le mot de passe sans le drapeau `--afficher`. Ne jamais ajouter de logging ou d'écho de secrets en clair.
-- **Secours vs flux nominal** : `--individuels` ignore le JSON global ; `--export` impose un fichier JSON précis. Ce sont des options de secours.
+- **Options de secours (extraction/restauration)** : `--export` impose un fichier JSON précis, `--individuels` ignore le JSON global et lit les fichiers individuels (morceaux bruts ou exports texte), `--sortie` choisit le CSV de sortie, et `--index` / `--morceaux` / `--meta` forcent les chemins d'index. Ce sont des options de secours ou de diagnostic.
 - **Pérennité des formats** : Modifier `--chunk-size` (500 octets) invalide les index et scans existants ; modifier la taille des QR impose une réimpression complète.
 - **Plafond de segmentation** : Le pipeline gère exactement ≤ 676 morceaux (338 000 octets, suffixes `aa`…`zz`, glob `morceau_??`). `split -a 2` est obligatoire ; au-delà, le script refuse le CSV au lieu de tronquer silencieusement.
 - **Permissions POSIX** : L'index ne contient pas les mots de passe, mais les noms, URL et identifiants restent des métadonnées sensibles. Permissions attendues : scripts 700 (`rwx------`), fichiers 600 (`rw-------`).
@@ -80,7 +87,7 @@ Pas de suite de tests automatisés.
    - une extraction `--nom` retrouve la ligne attendue ;
    - tester CRLF et LF, avec et sans saut de ligne final.
 2. **Test des scripts USB / RAM** :
-   Utiliser impérativement des fichiers images temporaires loopback (`dd` ou `fallocate` + `losetup`) avec `--allow-loopback` pour valider les scripts partitionnés et LUKS2 sans risquer un disque physique. Isoler le `HOME` de test pour ne jamais toucher une sauvegarde d'en-tête réelle.
+   Utiliser impérativement des fichiers images temporaires loopback (`dd` ou `fallocate` + `losetup`) avec `--allow-loopback` pour valider les scripts partitionnés et LUKS2 sans risquer un disque physique. Isoler le répertoire personnel avec un utilisateur de test dédié : les scripts résolvent `REAL_HOME` via `getent passwd "$SUDO_USER"` et ignorent la variable `HOME`. Ne jamais lancer un test loopback depuis le compte qui possède une vraie sauvegarde d'en-tête : utilisez un utilisateur dédié ou déplacez temporairement `~/luks_header_qr.bak.age` avant le test.
 3. **Contrôle de syntaxe obligatoire** :
    `python3 -m py_compile *.py && bash -n *.sh`
 
