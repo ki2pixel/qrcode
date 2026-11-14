@@ -70,6 +70,7 @@ Audit cryptographique et d'intégrité : `docs/Audit-technique-cryptographique-e
 - Données exclusivement en tmpfs (`$XDG_RUNTIME_DIR/qrcode_web_5100` ou `/dev/shm/qrcode_web_5100_<uid>`), `umask 077`, core dumps désactivés, expiration des tâches/sessions après 60 min et purge à l'arrêt. Le bouton « Purger la session » force le nettoyage immédiat.
 - Jeton aléatoire par lancement dans le fragment d'URL (`#jeton=…`), cookie `HttpOnly`/`SameSite=Strict`, en-tête `X-QR-Web` sur `/api`, contrôle `Host` et `Origin` des requêtes mutantes, CSP stricte, `Cache-Control: no-store`, journal HTTP sans query string ni secret.
 - Les archives ZIP importées ne fournissent que les trois index ; les scripts exécutés sont toujours ceux du dépôt, jamais ceux de l'archive. Téléversements CSV limités à 338 000 octets, scans à 16 Mio, ZIP à 256 Mio, index à 64 Mio et métadonnées à 1 Mio, avec protections zip-slip et zip-bomb.
+- Les règles de développement et d'audit du frontend (CSP stricte, zéro dépendance JavaScript, hygiène des secrets, accessibilité, assistant USB) sont décrites dans `.agents/skills/interface-web-locale/SKILL.md`.
 
 ## Pièges vérifiés
 
